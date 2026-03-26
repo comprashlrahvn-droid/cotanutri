@@ -373,10 +373,7 @@ canvas{max-width:100%}
         <svg width="15" height="15" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24"><path d="M12 10v6m0 0l-3-3m3 3l3-3M3 17V7a2 2 0 012-2h6l2 2h6a2 2 0 012 2v8a2 2 0 01-2 2H5a2 2 0 01-2-2z"/></svg>
         Baixar PDF Completo (Comparativo + OCs)
       </button>
-      <button class="btn btn-outline" onclick="downloadCotacaoXLS()">
-        <svg width="15" height="15" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24"><path d="M12 10v6m0 0l-3-3m3 3l3-3M3 17V7a2 2 0 012-2h6l2 2h6a2 2 0 012 2v8a2 2 0 01-2 2H5a2 2 0 01-2-2z"/></svg>
-        Baixar Pedido em XLS
-      </button>
+
     </div>
     <div class="card" style="margin-bottom:20px">
       <div class="card-header">
@@ -1575,84 +1572,32 @@ function downloadCompletoPDF(){
   toast('PDF completo gerado: '+fileName,'success');
 }
 
-// ══ DOWNLOAD XLS (Pedido/OC em planilha) ══
-function downloadCotacaoXLS(forceCotId){
-  const cotId=forceCotId||parseInt(document.getElementById('analise-cotacao-select').value);
-  if(!cotId){toast('Selecione uma cotação primeiro','error');return;}
+// ══ DOWNLOAD XLS (Pedido — itens e quantidades) ══
+function downloadCotacaoXLS(cotId){
   const cot=state.cotacoes.find(c=>c.id===cotId);
-  if(forceCotId){analisarCotacao(forceCotId);}
-  const ordensMap=window._ordensData;
-  if(!cot||!ordensMap){toast('Nenhuma OC gerada para exportar. Verifique se há respostas de fornecedores para esta cotação.','error');return;}
-
+  if(!cot){toast('Cotação não encontrada','error');return;}
   const now=new Date();
   const dd=String(now.getDate()).padStart(2,'0');
-  const mm2=String(now.getMonth()+1).padStart(2,'0');
+  const mm=String(now.getMonth()+1).padStart(2,'0');
   const yyyy=now.getFullYear();
-  const today=now.toLocaleDateString('pt-BR');
-
-  // Build CSV content (Excel-compatible UTF-8 with BOM)
-  let csv='﻿'; // BOM for Excel UTF-8
-
+  const hh=String(now.getHours()).padStart(2,'0');
+  const mi=String(now.getMinutes()).padStart(2,'0');
+  const dataHora=dd+'/'+mm+'/'+yyyy+' '+hh+':'+mi;
+  let csv='\uFEFF';
   csv+='ASSOCIAÇÃO HOSPITALAR VILA NOVA\n';
-  csv+='Pedido de Compra — '+cot.title+'\n';
-
-  csv+='Gerado em: '+today+'\n';
-
+  csv+='Pedido de Cotação: '+cot.title+'\n';
+  csv+='Data/Hora da Solicitação: '+dataHora+'\n';
   csv+='\n';
-
-  Object.values(ordensMap).forEach(({resp,items})=>{
-    const grandTotal=items.reduce((s,i)=>s+i.total,0);
-    const ocId='OC-'+cotId+'-'+resp.id+'-'+yyyy;
-
-    csv+='ORDEM DE COMPRA: '+ocId+'\n';
-
-    csv+='Fornecedor: '+resp.razaoSocial+'\n';
-
-    csv+='CNPJ: '+resp.cnpj+'\n';
-
-    if(resp.contato)csv+='Contato: '+resp.contato+'\n';
-
-    csv+='\n';
-
-    csv+='Código;Descrição;Tipo;Quantidade;Unidade;Preço Unitário;Total\n';
-    items.forEach(i=>{
-      csv+='"'+i.code+'";"'+i.name+(i._redirected?' [Redirecionado]':'')+'";"'+(i.type==='perecivel'?'Perecível':'Não Perecível')+'";'+i.qty+';'+i.unit+';'+i.unitPrice.toFixed(2).replace('.',',')+';'+i.total.toFixed(2).replace('.',',')+'\n';
-
-    });
-    csv+=';;;;;;;TOTAL GERAL;R$ '+grandTotal.toFixed(2).replace('.',',')+'\n';
-
-    csv+='\n';
-  });
-
-  // Comparativo sheet section
-  const resps=state.respostas.filter(r=>r.cotacaoId===cotId);
-  csv+='\n';
-  csv+='COMPARATIVO DE PREÇOS\n';
-  const suppHeaders=resps.map(r=>'"'+r.razaoSocial+'"').join(';');
-  csv+='Item;Qtd;'+suppHeaders+';Melhor Preço;Fornecedor Vencedor\n';
-
-  cot.items.forEach(item=>{
-    let best=null,bestSupp='—';
-    const prices=resps.map(r=>{
-      const p=r.prices.find(p=>p.itemId===item.id||p.itemId===item.itemId);
-      if(p&&p.disponivel&&p.price>0){
-        if(best===null||p.price<best){best=p.price;bestSupp=r.razaoSocial;}
-        return p.price.toFixed(2).replace('.',',');
-      }
-      return 'N/D';
-    });
-    csv+='"'+item.name+'";'+item.qty+' '+item.unit+';'+prices.join(';')+';'+(best?best.toFixed(2).replace('.',','):'N/D')+';'+bestSupp+'\n';
-
-  });
-
+  csv+='Item;Quantidade\n';
+  cot.items.forEach(i=>{csv+='"'+i.name+'";'+i.qty+' '+i.unit+'\n';});
   const blob=new Blob([csv],{type:'text/csv;charset=utf-8;'});
   const url=URL.createObjectURL(blob);
   const a=document.createElement('a');
   a.href=url;
-  a.download='Pedido_'+cot.title.replace(/[^a-zA-Z0-9]/g,'_')+'_'+dd+mm2+yyyy+'.csv';
+  a.download='Pedido_'+cot.title.replace(/[^a-zA-Z0-9]/g,'_')+'_'+dd+mm+yyyy+'.csv';
   document.body.appendChild(a);a.click();document.body.removeChild(a);
   URL.revokeObjectURL(url);
-  toast('Planilha gerada! Abra no Excel e salve como .xlsx','success');
+  toast('Planilha do pedido gerada!','success');
 }
 
 function downloadOC(respId,cotId){
