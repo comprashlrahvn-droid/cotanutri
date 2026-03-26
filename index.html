@@ -901,6 +901,12 @@ function renderCotacoes(){
             <button class="btn btn-outline btn-sm" onclick="openSupplierForm(${cot.id})">👁️ Simular Fornecedor</button>
           </div>
         </div>
+        <div style="margin-bottom:16px">
+          <button class="btn btn-outline btn-sm" onclick="downloadCotacaoXLS(${cot.id})">
+            <svg width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24"><path d="M12 10v6m0 0l-3-3m3 3l3-3M3 17V7a2 2 0 012-2h6l2 2h6a2 2 0 012 2v8a2 2 0 01-2 2H5a2 2 0 01-2-2z"/></svg>
+            Baixar Pedido em XLS
+          </button>
+        </div>
         <details>
           <summary style="cursor:pointer;font-size:13px;font-weight:600;color:var(--gray-500);user-select:none">Ver itens (${cot.items.length})</summary>
           <div style="margin-top:10px;display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:8px">
@@ -1177,8 +1183,9 @@ function getBestPrices(cotId){
   return ordensMap;
 }
 
-function analisarCotacao(){
-  const cotId=parseInt(document.getElementById('analise-cotacao-select').value);
+function analisarCotacao(forceCotId){
+  if(forceCotId){const sel=document.getElementById('analise-cotacao-select');if(sel)sel.value=forceCotId;}
+  const cotId=forceCotId||parseInt(document.getElementById('analise-cotacao-select').value);
   // Reset overrides only when cotacao actually changes (not on re-render)
   if(!window._lastAnalysedCotId||window._lastAnalysedCotId!==cotId){if(cotId)window._lastAnalysedCotId=cotId;}
   document.getElementById('analise-result').classList.add('hidden');
@@ -1569,12 +1576,13 @@ function downloadCompletoPDF(){
 }
 
 // ══ DOWNLOAD XLS (Pedido/OC em planilha) ══
-function downloadCotacaoXLS(){
-  const cotId=parseInt(document.getElementById('analise-cotacao-select').value);
+function downloadCotacaoXLS(forceCotId){
+  const cotId=forceCotId||parseInt(document.getElementById('analise-cotacao-select').value);
   if(!cotId){toast('Selecione uma cotação primeiro','error');return;}
   const cot=state.cotacoes.find(c=>c.id===cotId);
+  if(forceCotId){analisarCotacao(forceCotId);}
   const ordensMap=window._ordensData;
-  if(!cot||!ordensMap){toast('Nenhuma OC gerada para exportar','error');return;}
+  if(!cot||!ordensMap){toast('Nenhuma OC gerada para exportar. Verifique se há respostas de fornecedores para esta cotação.','error');return;}
 
   const now=new Date();
   const dd=String(now.getDate()).padStart(2,'0');
