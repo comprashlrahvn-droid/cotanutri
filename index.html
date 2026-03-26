@@ -280,6 +280,10 @@ canvas{max-width:100%}
       <select id="filter-category" onchange="renderItems()" style="padding:8px 14px;font-size:13px;border:1.5px solid var(--gray-200);border-radius:8px">
         <option value="">Todas as categorias</option>
       </select>
+      <button class="btn btn-ghost btn-sm" onclick="restoreSeedItems()" title="Restaurar lista padrão de itens" style="font-size:12px">
+        <svg width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24"><path d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/></svg>
+        Restaurar Padrão
+      </button>
       <button class="btn btn-primary" onclick="openItemModal()">
         <svg width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24"><path d="M12 4v16m8-8H4"/></svg>
         Novo Item
@@ -648,18 +652,34 @@ let state = { items:[], cotacoes:[], respostas:[], nextItemId:1, nextCotId:1, ne
 let charts = {};
 
 function loadState(){
-  try{const s=localStorage.getItem('vn-cot-v3');if(s)state=JSON.parse(s);}catch(e){}
+  try{
+    // Migração: lê chave antiga v3 se v4 não existir ainda
+    const s4=localStorage.getItem('vn-cot-v4');
+    const s3=localStorage.getItem('vn-cot-v3');
+    const raw = s4 || s3;
+    if(raw){
+      const parsed = JSON.parse(raw);
+      // Valida estrutura mínima antes de aceitar
+      if(parsed && typeof parsed === 'object'){
+        state = parsed;
+        // Migra cotações e respostas se existirem na v3
+        if(!s4 && s3){ saveState(); localStorage.removeItem('vn-cot-v3'); }
+      }
+    }
+  }catch(e){ console.warn('loadState error, resetting:', e); state = { items:[], cotacoes:[], respostas:[], nextItemId:1, nextCotId:1, nextRespId:1 }; }
   // Garante que os itens da planilha estejam sempre carregados
-  if(!state.items||state.items.length===0){
+  if(!state.items || !Array.isArray(state.items) || state.items.length===0){
     state.items=JSON.parse(JSON.stringify(SEED_ITEMS));
     state.nextItemId=SEED_NEXT_ID;
   }
-  // Cotações e respostas sempre começam limpos (dados ficam só no navegador do gestor)
-  if(!state.cotacoes) state.cotacoes=[];
-  if(!state.respostas) state.respostas=[];
+  // Garante campos obrigatórios
+  if(!state.cotacoes || !Array.isArray(state.cotacoes)) state.cotacoes=[];
+  if(!state.respostas || !Array.isArray(state.respostas)) state.respostas=[];
+  if(!state.nextCotId) state.nextCotId=1;
+  if(!state.nextRespId) state.nextRespId=1;
   saveState();
 }
-function saveState(){localStorage.setItem('vn-cot-v3',JSON.stringify(state));}
+function saveState(){localStorage.setItem('vn-cot-v4',JSON.stringify(state));}
 
 // ══ NAV ══
 function showPage(id){
@@ -743,6 +763,14 @@ function deleteItem(id){
   saveState();renderItems();toast('Item removido','info');
 }
 
+
+function restoreSeedItems(){
+  if(!confirm('Isso irá restaurar a lista padrão de 122 itens. Itens personalizados com ID >= '+SEED_NEXT_ID+' serão mantidos. Continuar?'))return;
+  const existingCustom = state.items.filter(i => i.id >= SEED_NEXT_ID);
+  state.items = [...JSON.parse(JSON.stringify(SEED_ITEMS)), ...existingCustom];
+  state.nextItemId = Math.max(SEED_NEXT_ID, ...state.items.map(i=>i.id)) + 1;
+  saveState();renderItems();toast('Lista padrão restaurada com sucesso!');
+}
 function renderItems(){
   updateCategoryFilter();
   const filter=document.getElementById('filter-category').value;
@@ -1557,51 +1585,43 @@ function downloadCotacaoXLS(){
   // Build CSV content (Excel-compatible UTF-8 with BOM)
   let csv='﻿'; // BOM for Excel UTF-8
 
-  csv+='ASSOCIAÇÃO HOSPITALAR VILA NOVA
-';
-  csv+='Pedido de Compra — '+cot.title+'
-';
-  csv+='Gerado em: '+today+'
-';
-  csv+='
-';
+  csv+='ASSOCIAÇÃO HOSPITALAR VILA NOVA\n';
+  csv+='Pedido de Compra — '+cot.title+'\n';
+
+  csv+='Gerado em: '+today+'\n';
+
+  csv+='\n';
 
   Object.values(ordensMap).forEach(({resp,items})=>{
     const grandTotal=items.reduce((s,i)=>s+i.total,0);
     const ocId='OC-'+cotId+'-'+resp.id+'-'+yyyy;
 
-    csv+='ORDEM DE COMPRA: '+ocId+'
-';
-    csv+='Fornecedor: '+resp.razaoSocial+'
-';
-    csv+='CNPJ: '+resp.cnpj+'
-';
-    if(resp.contato)csv+='Contato: '+resp.contato+'
-';
-    csv+='
-';
+    csv+='ORDEM DE COMPRA: '+ocId+'\n';
 
-    csv+='Código;Descrição;Tipo;Quantidade;Unidade;Preço Unitário;Total
-';
+    csv+='Fornecedor: '+resp.razaoSocial+'\n';
+
+    csv+='CNPJ: '+resp.cnpj+'\n';
+
+    if(resp.contato)csv+='Contato: '+resp.contato+'\n';
+
+    csv+='\n';
+
+    csv+='Código;Descrição;Tipo;Quantidade;Unidade;Preço Unitário;Total\n';
     items.forEach(i=>{
-      csv+='"'+i.code+'";"'+i.name+(i._redirected?' [Redirecionado]':'')+'";"'+(i.type==='perecivel'?'Perecível':'Não Perecível')+'";'+i.qty+';'+i.unit+';'+i.unitPrice.toFixed(2).replace('.',',')+';'+i.total.toFixed(2).replace('.',',')+'
-';
+      csv+='"'+i.code+'";"'+i.name+(i._redirected?' [Redirecionado]':'')+'";"'+(i.type==='perecivel'?'Perecível':'Não Perecível')+'";'+i.qty+';'+i.unit+';'+i.unitPrice.toFixed(2).replace('.',',')+';'+i.total.toFixed(2).replace('.',',')+'\n';
+
     });
-    csv+=';;;;;;;TOTAL GERAL;R$ '+grandTotal.toFixed(2).replace('.',',')+'
-';
-    csv+='
-';
+    csv+=';;;;;;;TOTAL GERAL;R$ '+grandTotal.toFixed(2).replace('.',',')+'\n';
+
+    csv+='\n';
   });
 
   // Comparativo sheet section
   const resps=state.respostas.filter(r=>r.cotacaoId===cotId);
-  csv+='
-';
-  csv+='COMPARATIVO DE PREÇOS
-';
+  csv+='\n';
+  csv+='COMPARATIVO DE PREÇOS\n';
   const suppHeaders=resps.map(r=>'"'+r.razaoSocial+'"').join(';');
-  csv+='Item;Qtd;'+suppHeaders+';Melhor Preço;Fornecedor Vencedor
-';
+  csv+='Item;Qtd;'+suppHeaders+';Melhor Preço;Fornecedor Vencedor\n';
 
   cot.items.forEach(item=>{
     let best=null,bestSupp='—';
@@ -1613,8 +1633,8 @@ function downloadCotacaoXLS(){
       }
       return 'N/D';
     });
-    csv+='"'+item.name+'";'+item.qty+' '+item.unit+';'+prices.join(';')+';'+(best?best.toFixed(2).replace('.',','):'N/D')+';'+bestSupp+'
-';
+    csv+='"'+item.name+'";'+item.qty+' '+item.unit+';'+prices.join(';')+';'+(best?best.toFixed(2).replace('.',','):'N/D')+';'+bestSupp+'\n';
+
   });
 
   const blob=new Blob([csv],{type:'text/csv;charset=utf-8;'});
