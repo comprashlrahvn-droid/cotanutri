@@ -778,7 +778,7 @@ function openCotacaoModal(){
         <div style="font-weight:600;font-size:13px">${item.name}</div>
         <div style="font-size:11px;color:var(--gray-400)">${item.code} · ${item.category} · ${item.type==='perecivel'?'Perecível':'Não Perecível'}</div>
       </div>
-      <input type="number" id="cot-qty-${item.id}" value="${item.qty||1}" min="0.01" step="0.01" style="padding:7px 10px;border:1.5px solid var(--gray-200);border-radius:6px;font-size:13px">
+      <input type="number" id="cot-qty-${item.id}" value="" placeholder="0" min="0.01" step="0.01" style="padding:7px 10px;border:1.5px solid var(--gray-200);border-radius:6px;font-size:13px">
       <span style="font-size:12px;color:var(--gray-500)">${item.unit}</span>
       <button onclick="removeCotacaoItemRow(${item.id})" title="Remover da cotação" style="background:rgba(200,16,46,0.08);border:1px solid rgba(200,16,46,0.25);color:var(--red);border-radius:6px;width:32px;height:32px;cursor:pointer;display:flex;align-items:center;justify-content:center;transition:all .15s;flex-shrink:0" onmouseover="this.style.background='var(--red)';this.style.color='#fff'" onmouseout="this.style.background='rgba(200,16,46,0.08)';this.style.color='var(--red)'">
         <svg width="13" height="13" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24"><path d="M18 6L6 18M6 6l12 12"/></svg>
@@ -790,11 +790,15 @@ function openCotacaoModal(){
 function saveCotacao(){
   const title=document.getElementById('cot-title').value.trim();
   if(!title){toast('Informe o título da cotação','error');return;}
-  const selectedItems=state.items.filter(item=>document.getElementById('cot-check-'+item.id)?.checked).map(item=>({
+  const selectedItems=state.items.filter(item=>{
+    const checked=document.getElementById('cot-check-'+item.id)?.checked;
+    const qty=parseFloat(document.getElementById('cot-qty-'+item.id)?.value)||0;
+    return checked && qty>0;
+  }).map(item=>({
     itemId:item.id,code:item.code,name:item.name,unit:item.unit,category:item.category,
-    type:item.type||'perecivel',qty:parseFloat(document.getElementById('cot-qty-'+item.id)?.value)||item.qty||1,obs:item.obs
+    type:item.type||'perecivel',qty:parseFloat(document.getElementById('cot-qty-'+item.id)?.value),obs:item.obs
   }));
-  if(!selectedItems.length){toast('Selecione pelo menos um item','error');return;}
+  if(!selectedItems.length){toast('Informe a quantidade de pelo menos um item para gerar a cotação','error');return;}
   const cotId=state.nextCotId++;
   state.cotacoes.push({id:cotId,title,deadline:document.getElementById('cot-deadline').value,items:selectedItems,createdAt:new Date().toISOString(),status:'aberta'});
   saveState();renderCotacoes();closeModal('modal-cotacao');
