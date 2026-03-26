@@ -364,6 +364,16 @@ canvas{max-width:100%}
   </div>
   <div id="analise-result" class="hidden">
     <div class="stats-grid" id="analise-stats"></div>
+    <div style="display:flex;gap:10px;margin-bottom:16px;flex-wrap:wrap">
+      <button class="btn btn-primary" onclick="downloadCompletoPDF()">
+        <svg width="15" height="15" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24"><path d="M12 10v6m0 0l-3-3m3 3l3-3M3 17V7a2 2 0 012-2h6l2 2h6a2 2 0 012 2v8a2 2 0 01-2 2H5a2 2 0 01-2-2z"/></svg>
+        Baixar PDF Completo (Comparativo + OCs)
+      </button>
+      <button class="btn btn-outline" onclick="downloadCotacaoXLS()">
+        <svg width="15" height="15" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24"><path d="M12 10v6m0 0l-3-3m3 3l3-3M3 17V7a2 2 0 012-2h6l2 2h6a2 2 0 012 2v8a2 2 0 01-2 2H5a2 2 0 01-2-2z"/></svg>
+        Baixar Pedido em XLS
+      </button>
+    </div>
     <div class="card" style="margin-bottom:20px">
       <div class="card-header">
         <span class="card-title">🏆 Comparativo de Preços por Item</span>
@@ -1355,6 +1365,268 @@ function resetOcOverrides(cotId){
 }
 
 // ══ PDF ══
+
+// ══ DOWNLOAD PDF COMPLETO (Comparativo + todas OCs) ══
+function downloadCompletoPDF(){
+  const {jsPDF}=window.jspdf;
+  const cotId=parseInt(document.getElementById('analise-cotacao-select').value);
+  if(!cotId){toast('Selecione uma cotação primeiro','error');return;}
+  const cot=state.cotacoes.find(c=>c.id===cotId);
+  const resps=state.respostas.filter(r=>r.cotacaoId===cotId);
+  const ordensMap=window._ordensData;
+  if(!cot||!resps.length||!ordensMap){toast('Nenhum dado para exportar','error');return;}
+
+  const doc=new jsPDF({orientation:'landscape',unit:'mm',format:'a4'});
+  const now=new Date();
+  const today=now.toLocaleDateString('pt-BR');
+  const dd=String(now.getDate()).padStart(2,'0');
+  const mm2=String(now.getMonth()+1).padStart(2,'0');
+  const yyyy=now.getFullYear();
+
+  // ── CAPA / HEADER ──
+  doc.setFillColor(26,92,58);doc.rect(0,0,297,40,'F');
+  try{doc.addImage(LOGO_URI,'JPEG',8,4,30,30);}catch(e){}
+  doc.setTextColor(255,255,255);
+  doc.setFontSize(18);doc.setFont('helvetica','bold');
+  doc.text('Associacao Hospitalar Vila Nova',46,16);
+  doc.setFontSize(11);doc.setFont('helvetica','normal');
+  doc.text('Relatório Completo de Cotação — '+cot.title,46,24);
+  doc.setFontSize(9);
+  doc.text('Gerado em: '+today+'  |  '+resps.length+' fornecedor(es)',46,31);
+  doc.setFillColor(200,16,46);doc.rect(0,40,297,3,'F');
+
+  // ── PÁGINA 1: COMPARATIVO ──
+  doc.setTextColor(26,92,58);doc.setFontSize(13);doc.setFont('helvetica','bold');
+  doc.text('1. Comparativo de Preços por Item',10,54);
+  doc.setFontSize(8);doc.setFont('helvetica','normal');doc.setTextColor(100,100,100);
+  doc.text('Verde = melhor preço  |  N/D = não ofertado',10,60);
+
+  const headerRow=['Item','Qtd'];
+  resps.forEach(r=>headerRow.push(r.razaoSocial.split(' ').slice(0,3).join(' ')));
+  headerRow.push('Melhor Preço','Fornecedor Vencedor');
+
+  const bodyRows=cot.items.map(item=>{
+    const row=[item.name,item.qty+' '+item.unit];
+    let best=null,bestSupp='—';
+    resps.forEach(r=>{
+      const p=r.prices.find(p=>p.itemId===item.id||p.itemId===item.itemId);
+      if(p&&p.disponivel&&p.price>0){
+        row.push('R$ '+p.price.toFixed(2).replace('.',','));
+        if(best===null||p.price<best){best=p.price;bestSupp=r.razaoSocial.split(' ').slice(0,3).join(' ');}
+      } else {row.push('N/D');}
+    });
+    row.push(best?'R$ '+best.toFixed(2).replace('.',','):'N/D');
+    row.push(bestSupp);
+    return row;
+  });
+
+  // column widths
+  const supplierColW=Math.min(38, Math.floor(180/resps.length));
+  const colStyles={0:{cellWidth:55},1:{cellWidth:18,halign:'center'}};
+  resps.forEach((_,i)=>{colStyles[2+i]={cellWidth:supplierColW,halign:'right'};});
+  colStyles[2+resps.length]={cellWidth:26,halign:'right',fontStyle:'bold'};
+  colStyles[3+resps.length]={cellWidth:40};
+
+  doc.autoTable({
+    startY:64,
+    head:[headerRow],
+    body:bodyRows,
+    headStyles:{fillColor:[26,92,58],textColor:255,fontStyle:'bold',fontSize:7.5},
+    bodyStyles:{fontSize:7.5,textColor:[40,40,40]},
+    alternateRowStyles:{fillColor:[240,250,244]},
+    columnStyles:colStyles,
+    margin:{left:10,right:10},
+    didParseCell:function(data){
+      if(data.section==='body'){
+        const row=bodyRows[data.row.index];
+        const lastPriceIdx=2+resps.length;
+        if(data.column.index>=2&&data.column.index<lastPriceIdx){
+          const bestVal=row[lastPriceIdx];
+          if(data.cell.raw===bestVal&&bestVal!=='N/D'){
+            data.cell.styles.fillColor=[209,250,229];
+            data.cell.styles.textColor=[22,101,52];
+            data.cell.styles.fontStyle='bold';
+          }
+        }
+      }
+    }
+  });
+
+  // ── PÁGINAS DE OC ──
+  Object.values(ordensMap).forEach(({resp,items})=>{
+    doc.addPage('a4','portrait');
+    const grandTotal=items.reduce((s,i)=>s+i.total,0);
+    const ocId='OC-'+cotId+'-'+resp.id+'-'+yyyy;
+
+    doc.setFillColor(26,92,58);doc.rect(0,0,210,52,'F');
+    try{doc.addImage(LOGO_URI,'JPEG',8,5,38,38);}catch(e){}
+    doc.setTextColor(255,255,255);
+    doc.setFontSize(16);doc.setFont('helvetica','bold');
+    doc.text('Associacao Hospitalar Vila Nova',52,16);
+    doc.setFontSize(8.5);doc.setFont('helvetica','normal');
+    doc.text('CNPJ: 04.994.418/0009-70',52,23);
+    doc.text('Rua Osvaldo Cruz, 116, Bela Vista - Campo Bom',52,29);
+    doc.text('CEP 93704-814',52,35);
+    doc.setFontSize(11);doc.setFont('helvetica','bold');
+    doc.text('ORDEM DE COMPRA',52,44);
+    doc.setFontSize(8);doc.setFont('helvetica','normal');
+    doc.text('Nº: '+ocId,165,16);doc.text('Data: '+today,165,22);
+    doc.setFillColor(200,16,46);doc.rect(0,52,210,3,'F');
+
+    doc.setFillColor(240,253,244);doc.rect(10,59,90,30,'F');
+    doc.setDrawColor(26,92,58);doc.setLineWidth(0.4);doc.rect(10,59,90,30);
+    doc.setTextColor(26,92,58);doc.setFontSize(7.5);doc.setFont('helvetica','bold');
+    doc.text('EMITENTE',14,65);
+    doc.setTextColor(40,40,40);doc.setFont('helvetica','normal');doc.setFontSize(8.5);
+    doc.text('Assoc. Hospitalar Vila Nova',14,71);
+    doc.text('CNPJ: 04.994.418/0009-70',14,77);
+    doc.text('Rua Osvaldo Cruz, 116 - Bela Vista',14,82);
+    doc.text('Campo Bom - RS  CEP 93704-814',14,87);
+
+    doc.setFillColor(255,245,245);doc.rect(105,59,95,30,'F');
+    doc.setDrawColor(200,16,46);doc.setLineWidth(0.4);doc.rect(105,59,95,30);
+    doc.setTextColor(200,16,46);doc.setFontSize(7.5);doc.setFont('helvetica','bold');
+    doc.text('FORNECEDOR',109,65);
+    doc.setTextColor(40,40,40);doc.setFont('helvetica','normal');doc.setFontSize(8.5);
+    doc.text(resp.razaoSocial.substring(0,40),109,71);
+    doc.text('CNPJ: '+resp.cnpj,109,77);
+    doc.text('Cotacao ref.: '+cot.title,109,82);
+    if(resp.contato)doc.text('Contato: '+resp.contato,109,87);
+
+    doc.autoTable({
+      startY:95,
+      head:[['Código','Descrição do Item','Tipo','Qtd','Unid.','Preço Unit.','Total (R$)']],
+      body:items.map(i=>[
+        i.code,i.name+(i._redirected?' [Redirecionado]':''),
+        i.type==='perecivel'?'Perecivel':'Nao Perecivel',
+        i.qty.toString(),i.unit,
+        'R$ '+i.unitPrice.toFixed(2).replace('.',','),
+        'R$ '+i.total.toFixed(2).replace('.',',')
+      ]),
+      foot:[['','','','','','TOTAL GERAL','R$ '+grandTotal.toFixed(2).replace('.',',')]],
+      headStyles:{fillColor:[26,92,58],textColor:255,fontStyle:'bold',fontSize:8.5},
+      footStyles:{fillColor:[200,16,46],textColor:255,fontStyle:'bold',fontSize:10},
+      bodyStyles:{fontSize:8.5,textColor:[40,40,40]},
+      alternateRowStyles:{fillColor:[240,250,244]},
+      columnStyles:{0:{cellWidth:22},1:{cellWidth:58},2:{cellWidth:22},3:{cellWidth:12,halign:'center'},4:{cellWidth:12,halign:'center'},5:{cellWidth:28,halign:'right'},6:{cellWidth:30,halign:'right',fontStyle:'bold'}},
+      margin:{left:10,right:10}
+    });
+
+    const fy=doc.lastAutoTable.finalY;
+    const obsY=fy+8;
+    doc.setFillColor(255,251,235);doc.setDrawColor(180,130,0);doc.setLineWidth(0.4);
+    doc.rect(10,obsY,190,18,'FD');
+    doc.setTextColor(120,80,0);doc.setFontSize(7.5);doc.setFont('helvetica','bold');
+    doc.text('OBSERVACOES / INSTRUCOES DE ENTREGA:',14,obsY+6);
+    doc.setFont('helvetica','normal');doc.setFontSize(8);doc.setTextColor(60,40,0);
+    doc.text('ENTREGA DE MERCADORIAS DE SEGUNDA A SEXTA DAS 07:30H AS 11:00H',14,obsY+11);
+    doc.text('FUNDOS DO HOSPITAL, SETOR DE NUTRICAO.',14,obsY+16);
+
+    const sigY=obsY+30;
+    doc.setDrawColor(160,160,160);doc.setLineWidth(0.3);
+    doc.line(14,sigY,84,sigY);doc.line(126,sigY,196,sigY);
+    doc.setFontSize(8);doc.setTextColor(100,100,100);doc.setFont('helvetica','normal');
+    doc.text('Comprador / Responsavel',30,sigY+5);
+    doc.text('Fornecedor / Representante',144,sigY+5);
+
+    doc.setFillColor(26,92,58);doc.rect(0,282,210,15,'F');
+    doc.setTextColor(255,255,255);doc.setFontSize(7);
+    doc.text('Associacao Hospitalar Vila Nova  |  Sistema de Cotacao de Insumos  |  Campo Bom - RS',105,289,{align:'center'});
+    doc.text('Documento gerado em '+today+' — '+ocId,105,294,{align:'center'});
+  });
+
+  const fileName='Completo_'+cot.title.replace(/[^a-zA-Z0-9]/g,'_')+'_'+dd+mm2+yyyy+'.pdf';
+  doc.save(fileName);
+  toast('PDF completo gerado: '+fileName,'success');
+}
+
+// ══ DOWNLOAD XLS (Pedido/OC em planilha) ══
+function downloadCotacaoXLS(){
+  const cotId=parseInt(document.getElementById('analise-cotacao-select').value);
+  if(!cotId){toast('Selecione uma cotação primeiro','error');return;}
+  const cot=state.cotacoes.find(c=>c.id===cotId);
+  const ordensMap=window._ordensData;
+  if(!cot||!ordensMap){toast('Nenhuma OC gerada para exportar','error');return;}
+
+  const now=new Date();
+  const dd=String(now.getDate()).padStart(2,'0');
+  const mm2=String(now.getMonth()+1).padStart(2,'0');
+  const yyyy=now.getFullYear();
+  const today=now.toLocaleDateString('pt-BR');
+
+  // Build CSV content (Excel-compatible UTF-8 with BOM)
+  let csv='﻿'; // BOM for Excel UTF-8
+
+  csv+='ASSOCIAÇÃO HOSPITALAR VILA NOVA
+';
+  csv+='Pedido de Compra — '+cot.title+'
+';
+  csv+='Gerado em: '+today+'
+';
+  csv+='
+';
+
+  Object.values(ordensMap).forEach(({resp,items})=>{
+    const grandTotal=items.reduce((s,i)=>s+i.total,0);
+    const ocId='OC-'+cotId+'-'+resp.id+'-'+yyyy;
+
+    csv+='ORDEM DE COMPRA: '+ocId+'
+';
+    csv+='Fornecedor: '+resp.razaoSocial+'
+';
+    csv+='CNPJ: '+resp.cnpj+'
+';
+    if(resp.contato)csv+='Contato: '+resp.contato+'
+';
+    csv+='
+';
+
+    csv+='Código;Descrição;Tipo;Quantidade;Unidade;Preço Unitário;Total
+';
+    items.forEach(i=>{
+      csv+='"'+i.code+'";"'+i.name+(i._redirected?' [Redirecionado]':'')+'";"'+(i.type==='perecivel'?'Perecível':'Não Perecível')+'";'+i.qty+';'+i.unit+';'+i.unitPrice.toFixed(2).replace('.',',')+';'+i.total.toFixed(2).replace('.',',')+'
+';
+    });
+    csv+=';;;;;;;TOTAL GERAL;R$ '+grandTotal.toFixed(2).replace('.',',')+'
+';
+    csv+='
+';
+  });
+
+  // Comparativo sheet section
+  const resps=state.respostas.filter(r=>r.cotacaoId===cotId);
+  csv+='
+';
+  csv+='COMPARATIVO DE PREÇOS
+';
+  const suppHeaders=resps.map(r=>'"'+r.razaoSocial+'"').join(';');
+  csv+='Item;Qtd;'+suppHeaders+';Melhor Preço;Fornecedor Vencedor
+';
+
+  cot.items.forEach(item=>{
+    let best=null,bestSupp='—';
+    const prices=resps.map(r=>{
+      const p=r.prices.find(p=>p.itemId===item.id||p.itemId===item.itemId);
+      if(p&&p.disponivel&&p.price>0){
+        if(best===null||p.price<best){best=p.price;bestSupp=r.razaoSocial;}
+        return p.price.toFixed(2).replace('.',',');
+      }
+      return 'N/D';
+    });
+    csv+='"'+item.name+'";'+item.qty+' '+item.unit+';'+prices.join(';')+';'+(best?best.toFixed(2).replace('.',','):'N/D')+';'+bestSupp+'
+';
+  });
+
+  const blob=new Blob([csv],{type:'text/csv;charset=utf-8;'});
+  const url=URL.createObjectURL(blob);
+  const a=document.createElement('a');
+  a.href=url;
+  a.download='Pedido_'+cot.title.replace(/[^a-zA-Z0-9]/g,'_')+'_'+dd+mm2+yyyy+'.csv';
+  document.body.appendChild(a);a.click();document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+  toast('Planilha gerada! Abra no Excel e salve como .xlsx','success');
+}
+
 function downloadOC(respId,cotId){
   const {jsPDF}=window.jspdf;
   const doc=new jsPDF({orientation:'portrait',unit:'mm',format:'a4'});
