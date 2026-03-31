@@ -553,10 +553,11 @@ canvas{max-width:100%}
 <div class="modal-overlay" id="modal-cotacao">
   <div class="modal" style="max-width:750px">
     <div class="modal-header">
-      <div class="modal-title">📋 Nova Cotação</div>
+      <div class="modal-title" id="modal-cotacao-title">📋 Nova Cotação</div>
       <button class="btn btn-ghost btn-icon" onclick="closeModal('modal-cotacao')">✕</button>
     </div>
     <div class="modal-body">
+      <input type="hidden" id="cot-edit-id" value="">
       <div class="form-grid" style="margin-bottom:20px">
         <div class="form-group"><label>Título da Cotação *</label><input type="text" id="cot-title" placeholder="Ex: Cotação Semanal #12"></div>
         <div class="form-group"><label>Prazo de Resposta</label><input type="date" id="cot-deadline"></div>
@@ -1152,11 +1153,24 @@ function renderItems() {
 }
 
 // ══ COTAÇÕES ══
-function openCotacaoModal() {
+function openCotacaoModal(editCotId) {
   if (!state.items.length) { toast('Cadastre pelo menos um item antes', 'error'); return; }
-  document.getElementById('cot-title').value = 'Cotação #' + state.nextCotId + ' — ' + new Date().toLocaleDateString('pt-BR');
-  const d = new Date(); d.setDate(d.getDate() + 3);
-  document.getElementById('cot-deadline').value = d.toISOString().split('T')[0];
+  const editCot = editCotId ? state.cotacoes.find(c => c.id === editCotId) : null;
+  const isEdit = !!editCot;
+
+  document.getElementById('cot-edit-id').value = editCotId || '';
+  document.getElementById('modal-cotacao-title').textContent = isEdit ? '✏️ Editar Cotação' : '📋 Nova Cotação';
+  document.getElementById('btn-save-cotacao').textContent = isEdit ? '✓ Salvar Alterações' : '🔗 Criar & Gerar Link';
+
+  if (isEdit) {
+    document.getElementById('cot-title').value = editCot.title || '';
+    document.getElementById('cot-deadline').value = editCot.deadline || '';
+  } else {
+    document.getElementById('cot-title').value = 'Cotação #' + state.nextCotId + ' — ' + new Date().toLocaleDateString('pt-BR');
+    const d = new Date(); d.setDate(d.getDate() + 3);
+    document.getElementById('cot-deadline').value = d.toISOString().split('T')[0];
+  }
+
   sortItems();
   const list = document.getElementById('cotacao-items-list');
   list.innerHTML = `<div style="display:flex;align-items:center;justify-content:space-between;padding:8px 14px 10px;border-bottom:1px solid var(--border-light);margin-bottom:8px">
@@ -1165,13 +1179,19 @@ function openCotacaoModal() {
       <button onclick="toggleAllCotItems(true)" style="font-size:11px;padding:4px 10px;background:var(--green);color:#fff;border:none;border-radius:6px;cursor:pointer">Marcar todos</button>
       <button onclick="toggleAllCotItems(false)" style="font-size:11px;padding:4px 10px;background:var(--border);color:var(--text-secondary);border:none;border-radius:6px;cursor:pointer">Desmarcar</button>
     </div>
-  </div>` + state.items.map(item => `
+  </div>` + state.items.map(item => {
+    // Em modo edição, pré-preenche com os dados salvos
+    const existingItem = isEdit ? (editCot.items||[]).find(ci => ci.itemId === item.id) : null;
+    const checked = isEdit ? !!existingItem : true;
+    const qty = existingItem ? existingItem.qty : '';
+    return `
     <div id="cot-row-${item.id}" style="display:grid;grid-template-columns:auto 1fr 100px 60px;gap:10px;align-items:center;padding:10px 14px;background:var(--bg-input);border-radius:8px;margin-bottom:6px;border:1px solid var(--border)">
-      <input type="checkbox" id="cot-check-${item.id}" style="width:16px;height:16px;accent-color:var(--green)" checked>
+      <input type="checkbox" id="cot-check-${item.id}" style="width:16px;height:16px;accent-color:var(--green)" ${checked ? 'checked' : ''}>
       <div><div style="font-weight:600;font-size:13px">${item.name}</div><div style="font-size:11px;color:var(--text-muted)">${item.code} · ${item.category}</div></div>
-      <input type="number" id="cot-qty-${item.id}" value="" placeholder="Qtd" min="0.01" step="0.01" style="padding:7px 10px;border:1.5px solid var(--border);border-radius:6px;font-size:13px">
+      <input type="number" id="cot-qty-${item.id}" value="${qty}" placeholder="Qtd" min="0.01" step="0.01" style="padding:7px 10px;border:1.5px solid var(--border);border-radius:6px;font-size:13px">
       <span style="font-size:12px;color:var(--text-muted)">${item.unit}</span>
-    </div>`).join('');
+    </div>`;
+  }).join('');
   openModal('modal-cotacao');
 }
 
@@ -1197,31 +1217,59 @@ async function saveCotacao() {
   }));
   if (!selectedItems.length) { toast('Informe a quantidade de pelo menos um item', 'error'); return; }
 
+  const editId = parseInt(document.getElementById('cot-edit-id').value) || null;
+  const isEdit = !!editId;
   const btn = document.getElementById('btn-save-cotacao');
   btn.disabled = true; btn.textContent = 'Salvando...';
 
-  const cotId = state.nextCotId++;
-  const cotacao = {
-    id: cotId, title,
-    deadline: document.getElementById('cot-deadline').value,
-    items: selectedItems,
-    createdAt: new Date().toISOString(),
-    status: 'aberta'
-  };
+  if (isEdit) {
+    // Modo edição — atualiza cotação existente
+    const cotExistente = state.cotacoes.find(c => c.id === editId);
+    if (!cotExistente) { toast('Cotação não encontrada', 'error'); btn.disabled=false; return; }
+    cotExistente.title    = title;
+    cotExistente.deadline = document.getElementById('cot-deadline').value;
+    cotExistente.items    = selectedItems;
 
-  const res = await apiCall('saveCotacao', cotacao);
-  btn.disabled = false; btn.textContent = '🔗 Criar & Gerar Link';
+    const res = await apiCall('saveCotacao', cotExistente);
+    btn.disabled = false; btn.textContent = '✓ Salvar Alterações';
 
-  if (res.status === 'ok') {
-    state.cotacoes.push(cotacao);
-    saveLocalState();
-    renderCotacoes(); updateBadges();
-    closeModal('modal-cotacao');
-    toast('Cotação criada e salva na planilha!');
-    showPage('page-cotacoes');
+    if (res.status === 'ok') {
+      renderCotacoes(); updateBadges();
+      closeModal('modal-cotacao');
+      toast('Cotação atualizada com sucesso!');
+      // Atualiza análise se essa cotação estiver aberta
+      const analiseSelect = document.getElementById('analise-cotacao-select');
+      if (analiseSelect && parseInt(analiseSelect.value) === editId) {
+        populateAnaliseSelect();
+      }
+    } else {
+      toast('Erro ao salvar: ' + (res.message || 'tente novamente'), 'error');
+    }
   } else {
-    toast('Erro ao salvar: ' + (res.message || 'tente novamente'), 'error');
-    state.nextCotId--;
+    // Modo criação
+    const cotId = state.nextCotId++;
+    const cotacao = {
+      id: cotId, title,
+      deadline: document.getElementById('cot-deadline').value,
+      items: selectedItems,
+      createdAt: new Date().toISOString(),
+      status: 'aberta'
+    };
+
+    const res = await apiCall('saveCotacao', cotacao);
+    btn.disabled = false; btn.textContent = '🔗 Criar & Gerar Link';
+
+    if (res.status === 'ok') {
+      state.cotacoes.push(cotacao);
+      saveLocalState();
+      renderCotacoes(); updateBadges();
+      closeModal('modal-cotacao');
+      toast('Cotação criada e salva na planilha!');
+      showPage('page-cotacoes');
+    } else {
+      toast('Erro ao salvar: ' + (res.message || 'tente novamente'), 'error');
+      state.nextCotId--;
+    }
   }
 }
 
@@ -1261,6 +1309,7 @@ function renderCotacoes() {
           <div style="display:flex;gap:8px;flex-wrap:wrap">
             <button class="btn btn-ghost btn-sm" onclick="copyLink('${link}')">📋 Copiar</button>
             <button class="btn btn-outline btn-sm" onclick="openSupplierForm(${cot.id})">👁️ Simular</button>
+            <button class="btn btn-ghost btn-sm" onclick="openCotacaoModal(${cot.id})">✏️ Editar</button>
           </div>
         </div>
         <button class="btn btn-outline btn-sm" onclick="downloadCotacaoXLS(${cot.id})">⬇️ Baixar Pedido XLS</button>
@@ -1523,22 +1572,24 @@ function recalcEquiv(itemId, cotUnit) {
 
 async function saveEditResposta() {
   const respId = parseInt(document.getElementById('er-resp-id').value);
-  const resp = state.respostas.find(r => r.id === respId); if (!resp) return;
+  const resp = state.respostas.find(r => r.id === respId);
+  if (!resp) { toast('Resposta não encontrada', 'error'); return; }
 
   const cot = state.cotacoes.find(c => c.id === resp.cotacaoId);
+  let qtyChanged = false;
 
   resp.prices = (resp.prices||[]).map(p => {
-    const cotItem  = (cot?.items||[]).find(i => i.itemId === p.itemId);
-    const cotUnit  = cotItem?.unit || p.unit;
-    const desq     = document.getElementById('er-disq-'+p.itemId)?.checked || false;
-    const price    = parseFloat(document.getElementById('er-price-'+p.itemId)?.value) || 0;
-    const qty      = parseFloat(document.getElementById('er-qty-'+p.itemId)?.value) || p.qty;
-    const disp     = document.getElementById('er-disp-'+p.itemId)?.value === 'sim';
-    const comment  = document.getElementById('er-comment-'+p.itemId)?.value || '';
+    const cotItem = (cot?.items||[]).find(i => i.itemId === p.itemId);
+    const cotUnit = cotItem?.unit || p.unit;
+    const desq    = document.getElementById('er-disq-'+p.itemId)?.checked || false;
+    const price   = parseFloat(document.getElementById('er-price-'+p.itemId)?.value) || 0;
+    const qty     = parseFloat(document.getElementById('er-qty-'+p.itemId)?.value) || p.qty;
+    const disp    = document.getElementById('er-disp-'+p.itemId)?.value === 'sim';
+    const comment = document.getElementById('er-comment-'+p.itemId)?.value || '';
 
-    // Propaga a nova quantidade para o item da cotação (análise e ordens de compra)
     if (cotItem && qty !== cotItem.qty) {
       cotItem.qty = qty;
+      qtyChanged = true;
     }
 
     return {
@@ -1547,22 +1598,27 @@ async function saveEditResposta() {
     };
   });
 
+  const saveBtn = document.querySelector('#modal-edit-resposta .modal-footer .btn-primary');
+  if (saveBtn) { saveBtn.disabled = true; saveBtn.textContent = 'Salvando...'; }
+
   const res = await apiCall('saveResposta', resp);
+
+  if (res.status === 'ok' && qtyChanged && cot) {
+    await apiCall('saveCotacao', cot);
+  }
+
+  if (saveBtn) { saveBtn.disabled = false; saveBtn.textContent = '✓ Salvar Alterações'; }
+
   if (res.status === 'ok') {
-    // Persiste as novas quantidades da cotação na planilha
-    if (cot) {
-      await apiCall('saveCotacao', cot);
-    }
     renderRespostas();
     closeModal('modal-edit-resposta');
     toast('Resposta atualizada com sucesso!');
-    // Atualiza análise e ordens de compra automaticamente se a cotação estiver selecionada
     const analiseSelect = document.getElementById('analise-cotacao-select');
     if (analiseSelect && parseInt(analiseSelect.value) === resp.cotacaoId) {
       analisarCotacao();
     }
   } else {
-    toast('Erro ao salvar: ' + (res.message||''), 'error');
+    toast('Erro ao salvar: ' + (res.message||'Tente novamente.'), 'error');
   }
 }
 
