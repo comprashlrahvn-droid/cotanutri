@@ -1008,16 +1008,22 @@ async function apiCall(action, data = {}) {
 async function syncAll() {
   setSyncStatus('syncing', 'Carregando...');
   try {
-    const [cotRes, respRes] = await Promise.all([
+    const [cotRes, respRes, itemsRes] = await Promise.all([
       apiCall('getCotacoes'),
-      apiCall('getAllRespostas')
+      apiCall('getAllRespostas'),
+      apiCall('getItems')
     ]);
     if (cotRes.status === 'ok') {
       state.cotacoes = cotRes.cotacoes || [];
       state.nextCotId = state.cotacoes.length ? Math.max(...state.cotacoes.map(c => c.id)) + 1 : 1;
     }
     if (respRes.status === 'ok') state.respostas = respRes.respostas || [];
-    renderCotacoes(); renderRespostas(); renderDashboard(); updateBadges();
+    if (itemsRes.status === 'ok' && itemsRes.items && itemsRes.items.length) {
+      state.items = itemsRes.items;
+      state.nextItemId = itemsRes.nextItemId || (Math.max(...state.items.map(i => i.id)) + 1);
+      saveLocalState();
+    }
+    renderItems(); renderCotacoes(); renderRespostas(); renderDashboard(); updateBadges();
     setSyncStatus('ok', 'Atualizado ' + new Date().toLocaleTimeString('pt-BR', { hour:'2-digit', minute:'2-digit' }));
   } catch(e) {
     setSyncStatus('error', 'Falha ao sincronizar');
@@ -1083,7 +1089,7 @@ function openItemModal(editId = null) {
   openModal('modal-item');
 }
 
-function saveItem() {
+async function saveItem() {
   const name = document.getElementById('item-name').value.trim();
   if (!name) { toast('Informe a descrição do item', 'error'); return; }
   const editId = document.getElementById('item-edit-id').value;
@@ -1100,27 +1106,39 @@ function saveItem() {
   if (editId) {
     const idx = state.items.findIndex(i => i.id === parseInt(editId));
     state.items[idx] = item;
-    toast('Item atualizado!');
   } else {
     state.items.push(item);
-    toast('Item cadastrado!');
   }
   // Reordena sempre após salvar
   saveLocalState(); renderItems(); updateBadges(); closeModal('modal-item');
+  // Persiste no servidor para todos os usuários
+  const res = await apiCall('saveItems', { items: state.items, nextItemId: state.nextItemId });
+  if (res.status === 'ok') {
+    toast(editId ? 'Item atualizado!' : 'Item cadastrado!');
+  } else {
+    toast((editId ? 'Item atualizado localmente' : 'Item cadastrado localmente') + ', mas falhou ao sincronizar com o servidor.', 'info');
+  }
 }
 
-function deleteItem(id) {
+async function deleteItem(id) {
   if (!confirm('Excluir este item?')) return;
   state.items = state.items.filter(i => i.id !== id);
   saveLocalState(); renderItems(); updateBadges(); toast('Item removido', 'info');
+  // Persiste no servidor para todos os usuários
+  const res = await apiCall('saveItems', { items: state.items, nextItemId: state.nextItemId });
+  if (res.status !== 'ok') {
+    toast('Remoção salva localmente, mas falhou ao sincronizar com o servidor.', 'info');
+  }
 }
 
-function restoreSeedItems() {
+async function restoreSeedItems() {
   if (!confirm('Restaurar lista padrão? Itens personalizados com ID >= ' + SEED_NEXT_ID + ' serão mantidos.')) return;
   const custom = state.items.filter(i => i.id >= SEED_NEXT_ID);
   state.items = [...JSON.parse(JSON.stringify(SEED_ITEMS)), ...custom];
   state.nextItemId = Math.max(SEED_NEXT_ID, ...state.items.map(i => i.id)) + 1;
   saveLocalState(); renderItems(); updateBadges(); toast('Lista padrão restaurada!');
+  // Persiste no servidor para todos os usuários
+  await apiCall('saveItems', { items: state.items, nextItemId: state.nextItemId });
 }
 
 const CATEGORIES = ['Hortifruti','Carnes','Laticínios','Padaria','Bebidas','Congelados','Grãos e Cereais','Enlatados','Higiene','Limpeza','Material de Escritório','Descartáveis','Outros'];
