@@ -1600,21 +1600,17 @@ async function saveEditResposta() {
   if (!resp) { toast('Resposta não encontrada', 'error'); return; }
 
   const cot = state.cotacoes.find(c => c.id === resp.cotacaoId);
-  let qtyChanged = false;
 
   resp.prices = (resp.prices||[]).map(p => {
     const cotItem = (cot?.items||[]).find(i => i.itemId === p.itemId);
     const cotUnit = cotItem?.unit || p.unit;
     const desq    = document.getElementById('er-disq-'+p.itemId)?.checked || false;
     const price   = parseFloat(document.getElementById('er-price-'+p.itemId)?.value) || 0;
+    // qty aqui representa a qtd ofertada pelo fornecedor nessa resposta,
+    // NÃO altera a cotação original (cotItem.qty permanece intacto)
     const qty     = parseFloat(document.getElementById('er-qty-'+p.itemId)?.value) || p.qty;
     const disp    = document.getElementById('er-disp-'+p.itemId)?.value === 'sim';
     const comment = document.getElementById('er-comment-'+p.itemId)?.value || '';
-
-    if (cotItem && qty !== cotItem.qty) {
-      cotItem.qty = qty;
-      qtyChanged = true;
-    }
 
     return {
       ...p, price, qty, disponivel: disp, comment, desqualificado: desq,
@@ -1627,19 +1623,21 @@ async function saveEditResposta() {
 
   const res = await apiCall('saveResposta', resp);
 
-  if (res.status === 'ok' && qtyChanged && cot) {
-    await apiCall('saveCotacao', cot);
-  }
-
   if (saveBtn) { saveBtn.disabled = false; saveBtn.textContent = '✓ Salvar Alterações'; }
 
   if (res.status === 'ok') {
     renderRespostas();
     closeModal('modal-edit-resposta');
     toast('Resposta atualizada com sucesso!');
+    // Sempre atualiza a aba Análise/Ordens com os novos dados,
+    // mesmo que o usuário não tenha visitado a aba ainda nesta sessão
     const analiseSelect = document.getElementById('analise-cotacao-select');
-    if (analiseSelect && parseInt(analiseSelect.value) === resp.cotacaoId) {
-      analisarCotacao();
+    if (analiseSelect) {
+      // Garante que o select da análise tenha a cotação populada
+      populateAnaliseSelect();
+      // Seleciona a cotação da resposta editada para forçar atualização
+      analiseSelect.value = resp.cotacaoId;
+      await analisarCotacao();
     }
   } else {
     toast('Erro ao salvar: ' + (res.message||'Tente novamente.'), 'error');
@@ -1709,7 +1707,14 @@ async function analisarCotacao() {
   if (!cot || !resps.length) { document.getElementById('analise-empty').querySelector('h3').textContent = 'Nenhuma resposta recebida para esta cotação'; return; }
   document.getElementById('analise-result').classList.remove('hidden');
   document.getElementById('analise-empty').classList.add('hidden');
-  const grandTotals = resps.map(r => (r.prices||[]).reduce((s,p) => s+(p.price*p.qty),0));
+  // Calcula totais usando priceEquiv x qtd da cotacao (consistente com getBestPrices)
+  const grandTotals = resps.map(r => (r.prices||[]).reduce((s,p) => {
+    if (p.desqualificado || !p.disponivel || p.price <= 0) return s;
+    const cotItem = (cot?.items||[]).find(i => i.itemId === p.itemId);
+    const qty = cotItem?.qty || p.qty;
+    const effPrice = (p.priceEquiv && p.priceEquiv > 0) ? p.priceEquiv : p.price;
+    return s + (effPrice * qty);
+  }, 0));
   const minTotal = Math.min(...grandTotals);
   const avgTotal = grandTotals.reduce((a,b) => a+b,0)/grandTotals.length;
   document.getElementById('analise-stats').innerHTML = `
