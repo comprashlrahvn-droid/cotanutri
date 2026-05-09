@@ -1600,17 +1600,22 @@ async function saveEditResposta() {
   if (!resp) { toast('Resposta não encontrada', 'error'); return; }
 
   const cot = state.cotacoes.find(c => c.id === resp.cotacaoId);
+  let qtyChanged = false;
 
   resp.prices = (resp.prices||[]).map(p => {
     const cotItem = (cot?.items||[]).find(i => i.itemId === p.itemId);
     const cotUnit = cotItem?.unit || p.unit;
     const desq    = document.getElementById('er-disq-'+p.itemId)?.checked || false;
     const price   = parseFloat(document.getElementById('er-price-'+p.itemId)?.value) || 0;
-    // qty aqui representa a qtd ofertada pelo fornecedor nessa resposta,
-    // NÃO altera a cotação original (cotItem.qty permanece intacto)
     const qty     = parseFloat(document.getElementById('er-qty-'+p.itemId)?.value) || p.qty;
     const disp    = document.getElementById('er-disp-'+p.itemId)?.value === 'sim';
     const comment = document.getElementById('er-comment-'+p.itemId)?.value || '';
+
+    // Propaga a quantidade editada para a cotação para que Análise e Ordens usem o valor correto
+    if (cotItem && qty !== cotItem.qty) {
+      cotItem.qty = qty;
+      qtyChanged = true;
+    }
 
     return {
       ...p, price, qty, disponivel: disp, comment, desqualificado: desq,
@@ -1621,7 +1626,11 @@ async function saveEditResposta() {
   const saveBtn = document.querySelector('#modal-edit-resposta .modal-footer .btn-primary');
   if (saveBtn) { saveBtn.disabled = true; saveBtn.textContent = 'Salvando...'; }
 
+  // Salva a resposta e, se necessário, a cotação com qtds atualizadas
   const res = await apiCall('saveResposta', resp);
+  if (res.status === 'ok' && qtyChanged && cot) {
+    await apiCall('saveCotacao', cot);
+  }
 
   if (saveBtn) { saveBtn.disabled = false; saveBtn.textContent = '✓ Salvar Alterações'; }
 
@@ -1629,13 +1638,10 @@ async function saveEditResposta() {
     renderRespostas();
     closeModal('modal-edit-resposta');
     toast('Resposta atualizada com sucesso!');
-    // Sempre atualiza a aba Análise/Ordens com os novos dados,
-    // mesmo que o usuário não tenha visitado a aba ainda nesta sessão
+    // Sempre atualiza a aba Análise/Ordens, mesmo que o usuário ainda não tenha acessado a aba
     const analiseSelect = document.getElementById('analise-cotacao-select');
     if (analiseSelect) {
-      // Garante que o select da análise tenha a cotação populada
       populateAnaliseSelect();
-      // Seleciona a cotação da resposta editada para forçar atualização
       analiseSelect.value = resp.cotacaoId;
       await analisarCotacao();
     }
