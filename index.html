@@ -1852,9 +1852,14 @@ function getBestPrices(cotId) {
 async function analisarCotacao() {
   const sel = document.getElementById('analise-cotacao-select');
   const cotId = parseInt(sel.value);
-  document.getElementById('analise-result').classList.add('hidden');
-  document.getElementById('analise-empty').classList.remove('hidden');
-  document.getElementById('analise-empty').querySelector('h3').textContent = 'Selecione uma cotação para análise';
+  // Atualização silenciosa: se já está analisando esta cotação, não esconde a tela (mantém a posição)
+  const silent = !!cotId && cotId === window._analiseCotId && !document.getElementById('analise-result').classList.contains('hidden');
+  if (!silent) {
+    document.getElementById('analise-result').classList.add('hidden');
+    document.getElementById('analise-empty').classList.remove('hidden');
+    document.getElementById('analise-empty').querySelector('h3').textContent = 'Selecione uma cotação para análise';
+    window._analiseCotId = null;
+  }
   if (!cotId) return;
   await loadRespostas(cotId);
   await loadOverrides(cotId);
@@ -1862,7 +1867,17 @@ async function analisarCotacao() {
   renderAnalise(cotId);
 }
 
+// Redesenha a análise mantendo a posição de rolagem (vertical e da tabela)
 function renderAnalise(cotId) {
+  const wrap = document.getElementById('analise-table')?.parentElement;
+  const sy = window.scrollY, sx = wrap ? wrap.scrollLeft : 0;
+  _renderAnaliseInner(cotId);
+  window._analiseCotId = cotId;
+  if (wrap) wrap.scrollLeft = sx;
+  window.scrollTo({ top: sy, left: window.scrollX, behavior: 'instant' });
+}
+
+function _renderAnaliseInner(cotId) {
   const cot = state.cotacoes.find(c => c.id === cotId);
   const resps = state.respostas.filter(r => r.cotacaoId === cotId);
   if (!cot || !resps.length) { document.getElementById('analise-empty').querySelector('h3').textContent = 'Nenhuma resposta recebida para esta cotação'; return; }
