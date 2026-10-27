@@ -625,6 +625,39 @@ canvas{max-width:100%}
   </div>
 </div>
 
+<!-- MODAL: AJUSTAR PROPOSTA (ANÁLISE) -->
+<div class="modal-overlay" id="modal-analise-edit" style="z-index:1700">
+  <div class="modal" style="max-width:480px">
+    <div class="modal-header">
+      <div class="modal-title">✏️ Alterar valor da proposta</div>
+      <button class="btn btn-ghost btn-icon" onclick="closeModal('modal-analise-edit')">✕</button>
+    </div>
+    <div class="modal-body">
+      <input type="hidden" id="ae-resp-id"><input type="hidden" id="ae-item-id">
+      <div id="ae-info" style="background:var(--bg-input);border-radius:8px;padding:12px 16px;margin-bottom:14px;font-size:13px"></div>
+      <div class="form-group" style="margin-bottom:12px">
+        <label>Valor original do fornecedor</label>
+        <div id="ae-orig" style="font-weight:700"></div>
+      </div>
+      <div class="form-group" style="margin-bottom:12px">
+        <label>Novo preço (R$) por <span id="ae-unit"></span> *</label>
+        <input type="number" id="ae-price" min="0" step="any">
+      </div>
+      <div class="form-group" style="margin-bottom:12px">
+        <label>Observação (opcional)</label>
+        <input type="text" id="ae-obs" placeholder="Ex: Valor negociado por telefone">
+      </div>
+      <div style="background:#fffbeb;border:1px solid #fde047;border-radius:8px;padding:10px 16px;font-size:12px;color:#713f12">
+        💡 O item ficará marcado como <strong>"Valor alterado pelo comprador"</strong> na análise e na ordem de compra. Voltar ao valor original remove a marcação.
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-ghost" onclick="closeModal('modal-analise-edit')">Cancelar</button>
+      <button class="btn btn-primary" id="ae-save-btn" onclick="saveAnaliseEdit()">✓ Salvar</button>
+    </div>
+  </div>
+</div>
+
 <!-- MODAL: NOVO USUÁRIO -->
 <div class="modal-overlay" id="modal-novo-usuario">
   <div class="modal">
@@ -1617,10 +1650,9 @@ async function saveEditResposta() {
       qtyChanged = true;
     }
 
-    return {
-      ...p, price, qty, disponivel: disp, comment, desqualificado: desq,
-      offerUnit: cotUnit, offerQtyPerUnit: '', priceEquiv: price
-    };
+    const np = { ...p, qty, disponivel: disp, comment, desqualificado: desq };
+    if (Math.abs(price - (p.price||0)) >= 0.00005) applyBuyerPrice(np, price, cotUnit, np.obsComprador||'');
+    return np;
   });
 
   const saveBtn = document.querySelector('#modal-edit-resposta .modal-footer .btn-primary');
@@ -1659,6 +1691,116 @@ function populateAnaliseSelect() {
   analisarCotacao();
 }
 
+// ══ AJUSTES DO COMPRADOR + DECISÕES DE EMPATE (persistidas) ══
+const OC_LOCAL_KEY = 'vn-oc-overrides-v1';
+function anEsc(s){ return String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
+function brl(v){ return 'R$ ' + Number(v||0).toFixed(2).replace('.',','); }
+function effPrice(p){ return (p.priceEquiv && p.priceEquiv > 0) ? p.priceEquiv : p.price; }
+
+function readLocalOverrides(){ try { return JSON.parse(localStorage.getItem(OC_LOCAL_KEY)||'{}'); } catch(e){ return {}; } }
+function writeLocalOverrides(cotId){
+  try { const all = readLocalOverrides(); all[cotId] = window.ocOverrides[cotId]||{}; localStorage.setItem(OC_LOCAL_KEY, JSON.stringify(all)); } catch(e){}
+}
+// Carrega as decisões salvas na planilha (se o GAS ainda não foi atualizado, usa o cache do navegador)
+async function loadOverrides(cotId){
+  let loaded = null;
+  try {
+    const res = await apiCall('getOverrides', { cotacaoId: cotId });
+    if (res && res.status === 'ok' && res.overrides && typeof res.overrides === 'object') loaded = res.overrides;
+  } catch(e) {}
+  if (!loaded) loaded = readLocalOverrides()[cotId] || {};
+  window.ocOverrides[cotId] = loaded;
+  writeLocalOverrides(cotId);
+}
+async function persistOverrides(cotId){
+  writeLocalOverrides(cotId);
+  try {
+    const res = await apiCall('saveOverrides', { cotacaoId: cotId, overrides: window.ocOverrides[cotId]||{} });
+    if (!res || res.status !== 'ok') toast('Decisão salva só neste navegador (falha ao sincronizar)', 'error');
+  } catch(e) { toast('Decisão salva só neste navegador (falha ao sincronizar)', 'error'); }
+}
+
+// Aplica um valor alterado pelo comprador (guarda a oferta original do fornecedor)
+function applyBuyerPrice(p, price, cotUnit, obs){
+  const orig = p.alteradoComprador ? p.ofertaOriginal
+    : { price: p.price, priceEquiv: p.priceEquiv, offerUnit: p.offerUnit, offerQtyPerUnit: p.offerQtyPerUnit };
+  const origEff = (orig.priceEquiv > 0) ? orig.priceEquiv : orig.price;
+  if (Math.abs(price - origEff) < 0.00005) {
+    // voltou ao valor original do fornecedor → remove a marcação
+    p.price = orig.price; p.priceEquiv = orig.priceEquiv;
+    p.offerUnit = orig.offerUnit; p.offerQtyPerUnit = orig.offerQtyPerUnit;
+    delete p.alteradoComprador; delete p.ofertaOriginal; delete p.precoOriginal; delete p.obsComprador;
+  } else {
+    if (!p.alteradoComprador) { p.ofertaOriginal = orig; p.precoOriginal = origEff; }
+    p.alteradoComprador = true;
+    p.price = price; p.priceEquiv = price;
+    p.offerUnit = cotUnit; p.offerQtyPerUnit = '';
+    p.obsComprador = obs || '';
+  }
+}
+
+function findPriceEntry(respId, itemId){
+  const r = state.respostas.find(x => x.id === respId);
+  if (!r) return {};
+  return { r, p: (r.prices||[]).find(p => p.itemId === itemId) };
+}
+
+async function saveRespostaAnalise(resp){
+  const res = await apiCall('saveResposta', resp);
+  if (!res || res.status !== 'ok') { toast('Erro ao salvar: ' + ((res && res.message)||'Tente novamente.'), 'error'); return false; }
+  return true;
+}
+
+async function toggleDesqualificarAnalise(respId, itemId){
+  const { r, p } = findPriceEntry(respId, itemId);
+  if (!p) return;
+  const novo = !p.desqualificado;
+  if (novo && !confirm('Desqualificar a proposta de ' + r.razaoSocial + ' para este item?')) return;
+  p.desqualificado = novo;
+  if (!(await saveRespostaAnalise(r))) { p.desqualificado = !novo; return; }
+  toast(novo ? 'Proposta desqualificada' : 'Proposta reativada');
+  renderAnalise(r.cotacaoId);
+}
+
+function openAnaliseEdit(respId, itemId){
+  const { r, p } = findPriceEntry(respId, itemId);
+  if (!p) return;
+  const cot = state.cotacoes.find(c => c.id === r.cotacaoId);
+  const item = (cot?.items||[]).find(i => i.itemId === itemId) || {};
+  const unit = item.unit || p.unit || '';
+  const origEff = p.alteradoComprador ? ((p.ofertaOriginal.priceEquiv > 0) ? p.ofertaOriginal.priceEquiv : p.ofertaOriginal.price) : effPrice(p);
+  document.getElementById('ae-resp-id').value = respId;
+  document.getElementById('ae-item-id').value = itemId;
+  document.getElementById('ae-info').innerHTML = '<strong>' + anEsc(item.name || p.name) + '</strong><br><span style="color:var(--text-muted)">' + anEsc(r.razaoSocial) + ' · ' + anEsc(item.qty||p.qty) + ' ' + anEsc(unit) + '</span>';
+  document.getElementById('ae-orig').textContent = brl(origEff) + ' / ' + unit;
+  document.getElementById('ae-unit').textContent = unit;
+  document.getElementById('ae-price').value = effPrice(p);
+  document.getElementById('ae-obs').value = p.obsComprador || '';
+  openModal('modal-analise-edit');
+}
+
+async function saveAnaliseEdit(){
+  const respId = parseInt(document.getElementById('ae-resp-id').value);
+  const itemId = parseInt(document.getElementById('ae-item-id').value);
+  const { r, p } = findPriceEntry(respId, itemId);
+  if (!p) return;
+  const price = parseFloat(document.getElementById('ae-price').value);
+  if (!(price > 0)) { toast('Informe um preço válido', 'error'); return; }
+  const obs = document.getElementById('ae-obs').value.trim();
+  const cot = state.cotacoes.find(c => c.id === r.cotacaoId);
+  const cotItem = (cot?.items||[]).find(i => i.itemId === itemId);
+  const backup = JSON.parse(JSON.stringify(p));
+  applyBuyerPrice(p, price, cotItem?.unit || p.unit, obs);
+  const btn = document.getElementById('ae-save-btn');
+  if (btn) { btn.disabled = true; btn.textContent = 'Salvando...'; }
+  const ok = await saveRespostaAnalise(r);
+  if (btn) { btn.disabled = false; btn.textContent = '✓ Salvar'; }
+  if (!ok) { Object.keys(p).forEach(k => delete p[k]); Object.assign(p, backup); return; }
+  closeModal('modal-analise-edit');
+  toast(p.alteradoComprador ? 'Valor alterado e marcado como "alterado pelo comprador"' : 'Valor original do fornecedor restaurado');
+  renderAnalise(r.cotacaoId);
+}
+
 function getBestPrices(cotId) {
   const cot = state.cotacoes.find(c => c.id === cotId);
   const resps = state.respostas.filter(r => r.cotacaoId === cotId);
@@ -1670,99 +1812,131 @@ function getBestPrices(cotId) {
     const ov = overrides[item.itemId];
     if (ov && ov.excluded) return;
     const valid = resps.map(r => {
-      const p = r.prices.find(p => p.itemId === item.itemId);
+      const p = (r.prices||[]).find(p => p.itemId === item.itemId);
       if (!p) return null;
-      if (p.desqualificado) return null;           // ← ignora desqualificados
+      if (p.desqualificado) return null;
       if (!p.disponivel || p.price <= 0) return null;
-      // Usa priceEquiv se disponível (já calculado na edição), senão usa price direto
-      const effectivePrice = (p.priceEquiv && p.priceEquiv > 0) ? p.priceEquiv : p.price;
-      return { price: effectivePrice, rawPrice: p.price, offerUnit: p.offerUnit, offerQtyPerUnit: p.offerQtyPerUnit, resp: r };
+      return { price: effPrice(p), rawPrice: p.price, offerUnit: p.offerUnit, offerQtyPerUnit: p.offerQtyPerUnit, resp: r,
+               altered: p.alteradoComprador === true, original: p.precoOriginal, obs: p.obsComprador || '' };
     }).filter(Boolean);
     if (!valid.length) return;
-    let chosen;
+    const minPrice = valid.reduce((a,b) => a.price<b.price?a:b).price;
+    const tied = valid.filter(v => Math.abs(v.price-minPrice)<0.001);
+    // A decisão salva só vale se o fornecedor escolhido ainda está entre os menores preços
+    let chosen = null, viaDecision = false;
     if (ov && ov.redirectedToRespId) {
-      chosen = valid.find(v => v.resp.id===ov.redirectedToRespId) || valid.reduce((a,b) => a.price<b.price?a:b);
-    } else {
-      const minPrice = valid.reduce((a,b) => a.price<b.price?a:b).price;
-      const tied = valid.filter(v => Math.abs(v.price-minPrice)<0.001);
-      if (tied.length > 1) { window._tieItems.push({item,price:minPrice,tied}); return; }
+      chosen = tied.find(v => v.resp.id === ov.redirectedToRespId) || null;
+      viaDecision = !!chosen;
+    }
+    if (!chosen) {
+      if (tied.length > 1) { window._tieItems.push({item, price:minPrice, tied}); return; }
       chosen = tied[0];
     }
     if (!ordensMap[chosen.resp.id]) ordensMap[chosen.resp.id] = {resp:chosen.resp, items:[]};
     ordensMap[chosen.resp.id].items.push({
       ...item,
-      unitPrice: chosen.price,          // preço equivalente por unidade cotada
-      rawPrice:  chosen.rawPrice,       // preço original ofertado
-      offerUnit: chosen.offerUnit,      // unidade do fornecedor
+      unitPrice: chosen.price,
+      rawPrice:  chosen.rawPrice,
+      offerUnit: chosen.offerUnit,
       offerQtyPerUnit: chosen.offerQtyPerUnit,
       total: chosen.price * item.qty,
-      _redirected: !!(ov && ov.redirectedToRespId)
+      _redirected: viaDecision,
+      _alterado: chosen.altered,
+      _precoOriginal: chosen.original,
+      _obs: chosen.obs
     });
   });
   return ordensMap;
 }
 
 async function analisarCotacao() {
-  const cotId = parseInt(document.getElementById('analise-cotacao-select').value);
+  const sel = document.getElementById('analise-cotacao-select');
+  const cotId = parseInt(sel.value);
   document.getElementById('analise-result').classList.add('hidden');
   document.getElementById('analise-empty').classList.remove('hidden');
+  document.getElementById('analise-empty').querySelector('h3').textContent = 'Selecione uma cotação para análise';
   if (!cotId) return;
   await loadRespostas(cotId);
+  await loadOverrides(cotId);
+  if (parseInt(sel.value) !== cotId) return; // usuário trocou de cotação durante o carregamento
+  renderAnalise(cotId);
+}
+
+function renderAnalise(cotId) {
   const cot = state.cotacoes.find(c => c.id === cotId);
   const resps = state.respostas.filter(r => r.cotacaoId === cotId);
   if (!cot || !resps.length) { document.getElementById('analise-empty').querySelector('h3').textContent = 'Nenhuma resposta recebida para esta cotação'; return; }
   document.getElementById('analise-result').classList.remove('hidden');
   document.getElementById('analise-empty').classList.add('hidden');
-  // Calcula totais usando priceEquiv x qtd da cotacao (consistente com getBestPrices)
+
   const grandTotals = resps.map(r => (r.prices||[]).reduce((s,p) => {
     if (p.desqualificado || !p.disponivel || p.price <= 0) return s;
-    const cotItem = (cot?.items||[]).find(i => i.itemId === p.itemId);
-    const qty = cotItem?.qty || p.qty;
-    const effPrice = (p.priceEquiv && p.priceEquiv > 0) ? p.priceEquiv : p.price;
-    return s + (effPrice * qty);
+    const cotItem = (cot.items||[]).find(i => i.itemId === p.itemId);
+    return s + (effPrice(p) * (cotItem?.qty || p.qty));
   }, 0));
   const minTotal = Math.min(...grandTotals);
   const avgTotal = grandTotals.reduce((a,b) => a+b,0)/grandTotals.length;
   document.getElementById('analise-stats').innerHTML = `
     <div class="stat-card"><div class="stat-label">Fornecedores</div><div class="stat-value">${resps.length}</div><div class="stat-sub">responderam</div></div>
-    <div class="stat-card"><div class="stat-label">Melhor Total</div><div class="stat-value" style="font-size:18px;color:var(--green)">R$ ${minTotal.toFixed(2).replace('.',',')}</div><div class="stat-sub">menor proposta</div></div>
-    <div class="stat-card"><div class="stat-label">Média das Propostas</div><div class="stat-value" style="font-size:18px">R$ ${avgTotal.toFixed(2).replace('.',',')}</div><div class="stat-sub">valor médio</div></div>
-    <div class="stat-card"><div class="stat-label">Economia Estimada</div><div class="stat-value" style="font-size:18px;color:var(--red)">R$ ${(avgTotal-minTotal).toFixed(2).replace('.',',')}</div><div class="stat-sub">vs. preço médio</div></div>`;
-  const table = document.getElementById('analise-table');
-  table.querySelector('thead tr').innerHTML = '<th>Item</th><th>Qtd</th>'+resps.map(r=>'<th>'+r.razaoSocial.split(' ').slice(0,2).join(' ')+'</th>').join('')+'<th>🏆 Melhor</th><th>Fornecedor Vencedor</th>';
-  table.querySelector('tbody').innerHTML = (cot.items||[]).map(item => {
-    const prices = resps.map(r => {
-      const p=(r.prices||[]).find(p=>p.itemId===item.itemId);
-      if (!p || p.desqualificado) return null;
-      if (!p.disponivel || p.price<=0) return null;
-      const effPrice = (p.priceEquiv && p.priceEquiv>0) ? p.priceEquiv : p.price;
-      return {price:effPrice, rawPrice:p.price, offerUnit:p.offerUnit, offerQtyPerUnit:p.offerQtyPerUnit, resp:r, comment:p.comment};
-    });
-    const valid = prices.filter(Boolean);
-    let best=null, bestSupp=null;
-    if (valid.length) { const b=valid.reduce((a,c)=>a.price<c.price?a:c); best=b.price; bestSupp=b.resp.razaoSocial; }
-    return `<tr><td><strong>${item.name}</strong><br><small style="color:var(--text-muted)">${item.code}</small></td><td>${item.qty} ${item.unit}</td>
-      ${prices.map(p=>{
-        if(!p) return '<td style="color:var(--text-muted);font-size:12px">N/D</td>';
-        const isBest=p.price===best;
-        const hasConv = p.offerUnit && p.offerUnit !== item.unit && p.offerQtyPerUnit;
-        const convLabel = hasConv ? `<br><small style="color:#7c3aed;font-size:10px">🔄 ${p.offerQtyPerUnit}${p.offerUnit} → equiv/kg</small>` : '';
-        return '<td>'+(isBest?'<span class="best-price">R$ '+p.price.toFixed(2).replace('.',',')+'</span>':'R$ '+p.price.toFixed(2).replace('.',','))+convLabel+(p.comment?'<br><small style="color:var(--text-muted);font-size:11px">💬 '+p.comment+'</small>':'')+'</td>';
-      }).join('')}
-      <td><span class="best-price">R$ ${best?best.toFixed(2).replace('.',','):'N/D'}</span></td>
-      <td style="font-weight:600;color:var(--green)">${bestSupp||'—'}</td></tr>`;
-  }).join('');
+    <div class="stat-card"><div class="stat-label">Melhor Total</div><div class="stat-value" style="font-size:18px;color:var(--green)">${brl(minTotal)}</div><div class="stat-sub">menor proposta</div></div>
+    <div class="stat-card"><div class="stat-label">Média das Propostas</div><div class="stat-value" style="font-size:18px">${brl(avgTotal)}</div><div class="stat-sub">valor médio</div></div>
+    <div class="stat-card"><div class="stat-label">Economia Estimada</div><div class="stat-value" style="font-size:18px;color:var(--red)">${brl(avgTotal-minTotal)}</div><div class="stat-sub">vs. preço médio</div></div>`;
+
+  // Ordens primeiro: o vencedor da tabela segue as decisões de empate salvas
   const ordensMap = getBestPrices(cotId);
   window._ordensData = ordensMap; window._currentCot = cot;
+  const ties = window._tieItems || [];
+  const tieIds = new Set(ties.map(t => t.item.itemId));
+  const winnerByItem = {};
+  Object.values(ordensMap||{}).forEach(({resp,items}) => items.forEach(i => { winnerByItem[i.itemId] = resp.razaoSocial; }));
+
+  const table = document.getElementById('analise-table');
+  table.querySelector('thead tr').innerHTML = '<th>Item</th><th>Qtd</th>'+resps.map(r=>'<th>'+anEsc(r.razaoSocial.split(' ').slice(0,2).join(' '))+'</th>').join('')+'<th>🏆 Melhor</th><th>Fornecedor Vencedor</th>';
+  const btnStyle = 'padding:2px 7px;font-size:11px';
+  table.querySelector('tbody').innerHTML = (cot.items||[]).map(item => {
+    const entries = resps.map(r => ({ r, p: (r.prices||[]).find(p => p.itemId === item.itemId) }));
+    const valid = entries.filter(e => e.p && !e.p.desqualificado && e.p.disponivel && e.p.price > 0);
+    let best = null;
+    if (valid.length) best = Math.min(...valid.map(e => effPrice(e.p)));
+    const cells = entries.map(({r,p}) => {
+      if (!p) return '<td style="color:var(--text-muted);font-size:12px">N/D</td>';
+      if (p.desqualificado) {
+        return `<td style="background:rgba(220,38,38,.05)">
+          <span style="text-decoration:line-through;color:var(--text-muted)">${brl(effPrice(p))}</span><br>
+          <span style="font-size:10px;background:var(--red-muted);color:var(--red);padding:2px 8px;border-radius:10px;font-weight:600">⛔ Desqualificado</span><br>
+          <button class="btn btn-ghost btn-sm" style="${btnStyle};margin-top:4px" onclick="toggleDesqualificarAnalise(${r.id},${item.itemId})">↩ Reativar</button></td>`;
+      }
+      if (!p.disponivel || p.price <= 0) return '<td style="color:var(--text-muted);font-size:12px">N/D</td>';
+      const price = effPrice(p);
+      const isBest = best !== null && Math.abs(price-best) < 0.00005;
+      const hasConv = p.offerUnit && p.offerUnit !== item.unit && p.offerQtyPerUnit;
+      const convLabel = hasConv ? `<br><small style="color:#7c3aed;font-size:10px">🔄 ${anEsc(p.offerQtyPerUnit)}${anEsc(p.offerUnit)} → equiv/${anEsc(item.unit)}</small>` : '';
+      const altBadge = p.alteradoComprador
+        ? `<br><span style="font-size:10px;background:#fef3c7;color:#92400e;padding:1px 6px;border-radius:8px;font-weight:600">✏️ Valor alterado pelo comprador</span><br><small style="color:var(--text-muted);font-size:10px">Original: ${brl(p.precoOriginal)}</small>${p.obsComprador?`<br><small style="color:#92400e;font-size:10px">📝 ${anEsc(p.obsComprador)}</small>`:''}`
+        : '';
+      return '<td>' + (isBest ? '<span class="best-price">'+brl(price)+'</span>' : brl(price)) + convLabel + altBadge
+        + (p.comment ? '<br><small style="color:var(--text-muted);font-size:11px">💬 '+anEsc(p.comment)+'</small>' : '')
+        + `<br><span style="display:inline-flex;gap:4px;margin-top:4px">
+            <button class="btn btn-ghost btn-sm" style="${btnStyle}" title="Alterar valor" onclick="openAnaliseEdit(${r.id},${item.itemId})">✏️</button>
+            <button class="btn btn-ghost btn-sm" style="${btnStyle};color:var(--red)" title="Desqualificar" onclick="toggleDesqualificarAnalise(${r.id},${item.itemId})">⛔</button></span></td>`;
+    }).join('');
+    const winnerCell = tieIds.has(item.itemId)
+      ? '<span style="font-size:12px;background:#fffbeb;color:#92400e;padding:2px 8px;border-radius:8px;font-weight:600">⚖️ Empate — decidir abaixo</span>'
+      : (winnerByItem[item.itemId] ? anEsc(winnerByItem[item.itemId]) : '—');
+    return `<tr><td><strong>${anEsc(item.name)}</strong><br><small style="color:var(--text-muted)">${anEsc(item.code)}</small></td><td>${item.qty} ${anEsc(item.unit)}</td>
+      ${cells}
+      <td><span class="best-price">${best!==null?brl(best):'N/D'}</span></td>
+      <td style="font-weight:600;color:var(--green)">${winnerCell}</td></tr>`;
+  }).join('');
+
   const container = document.getElementById('ordens-container');
   if (!ordensMap) { container.innerHTML=''; return; }
-  const ties = window._tieItems||[];
   const tieBanner = ties.length ? `<div style="background:#fffbeb;border:2px solid #f59e0b;border-radius:12px;padding:20px 24px;margin-bottom:20px">
     <div style="font-weight:700;font-size:15px;color:#92400e;margin-bottom:14px">⚠️ ${ties.length} item(s) com empate de preço — decisão necessária</div>
     ${ties.map(t=>`<div style="background:#fff;border:1.5px solid #fcd34d;border-radius:8px;padding:14px 16px;margin-bottom:10px">
-      <div style="font-weight:700;font-size:13px;color:#78350f;margin-bottom:10px">📦 ${t.item.name} — R$ ${t.price.toFixed(2).replace('.',',')} (empate)</div>
+      <div style="font-weight:700;font-size:13px;color:#78350f;margin-bottom:10px">📦 ${anEsc(t.item.name)} — ${brl(t.price)} (empate)</div>
       <div style="display:flex;flex-wrap:wrap;gap:8px">
-        ${t.tied.map(v=>`<button onclick="resolveTie(${cotId},${t.item.itemId},${v.resp.id})" style="padding:8px 16px;background:var(--green);color:#fff;border:none;border-radius:8px;font-weight:600;font-size:12px;cursor:pointer">✅ ${v.resp.razaoSocial}</button>`).join('')}
+        ${t.tied.map(v=>`<button onclick="resolveTie(${cotId},${t.item.itemId},${v.resp.id})" style="padding:8px 16px;background:var(--green);color:#fff;border:none;border-radius:8px;font-weight:600;font-size:12px;cursor:pointer">✅ ${anEsc(v.resp.razaoSocial)}</button>`).join('')}
       </div>
     </div>`).join('')}
   </div>` : '';
@@ -1771,10 +1945,10 @@ async function analisarCotacao() {
     const ocId = 'OC-'+cotId+'-'+resp.id+'-'+new Date().getFullYear();
     return `<div class="card" style="margin-bottom:16px">
       <div class="card-header">
-        <div><div class="card-title">📦 Ordem de Compra — ${resp.razaoSocial}</div>
-          <div style="font-size:12px;color:var(--text-muted)">${resp.cnpj} · ${ocId} · ${items.length} item(s)</div></div>
+        <div><div class="card-title">📦 Ordem de Compra — ${anEsc(resp.razaoSocial)}</div>
+          <div style="font-size:12px;color:var(--text-muted)">${anEsc(resp.cnpj)} · ${ocId} · ${items.length} item(s)</div></div>
         <div style="display:flex;align-items:center;gap:10px">
-          <strong style="color:var(--green);font-size:16px">R$ ${grandTotal.toFixed(2).replace('.',',')}</strong>
+          <strong style="color:var(--green);font-size:16px">${brl(grandTotal)}</strong>
           <button class="btn btn-danger btn-sm" onclick="downloadOC(${resp.id},${cotId})">⬇️ Baixar PDF</button>
         </div>
       </div>
@@ -1785,20 +1959,26 @@ async function analisarCotacao() {
             ${items.map(i=>{
               const hasConv = i.offerUnit && i.offerUnit !== i.unit && i.offerQtyPerUnit;
               const convNote = hasConv
-                ? `<br><span style="font-size:10px;background:#ede9fe;color:#6d28d9;padding:1px 6px;border-radius:6px;font-weight:600;">🔄 Ofertado: ${i.offerQtyPerUnit}${i.offerUnit} = R$ ${i.rawPrice?i.rawPrice.toFixed(2):''}</span>`
+                ? `<br><span style="font-size:10px;background:#ede9fe;color:#6d28d9;padding:1px 6px;border-radius:6px;font-weight:600;">🔄 Ofertado: ${anEsc(i.offerQtyPerUnit)}${anEsc(i.offerUnit)} = R$ ${i.rawPrice?i.rawPrice.toFixed(2):''}</span>`
+                : '';
+              const altNote = i._alterado
+                ? `<br><span style="font-size:10px;background:#fef3c7;color:#92400e;padding:1px 6px;border-radius:8px;font-weight:600;">✏️ Valor alterado pelo comprador${i._precoOriginal?' (original '+brl(i._precoOriginal)+')':''}</span>${i._obs?`<br><small style="color:#92400e;font-size:10px">📝 ${anEsc(i._obs)}</small>`:''}`
+                : '';
+              const redirNote = i._redirected
+                ? `<br><span style="font-size:10px;background:#dbeafe;color:#1e40af;padding:1px 6px;border-radius:8px;font-weight:600;">↺ Empate decidido</span> <a href="#" style="font-size:10px;color:var(--text-muted)" onclick="undoTie(${cotId},${i.itemId});return false">desfazer</a>`
                 : '';
               return `<tr>
-                <td><code style="background:var(--bg-input);padding:2px 7px;border-radius:4px;font-family:monospace;font-size:12px">${i.code}</code></td>
-                <td>${i.name}${i._redirected?'<br><span style="font-size:10px;background:#dbeafe;color:#1e40af;padding:1px 6px;border-radius:8px;font-weight:600;">↺ Redirecionado</span>':''}${convNote}</td>
+                <td><code style="background:var(--bg-input);padding:2px 7px;border-radius:4px;font-family:monospace;font-size:12px">${anEsc(i.code)}</code></td>
+                <td>${anEsc(i.name)}${redirNote}${altNote}${convNote}</td>
                 <td><span class="badge ${i.type==='perecivel'?'badge-red':'badge-purple'}">${i.type==='perecivel'?'Perecível':'Não Perecível'}</span></td>
-                <td>${i.qty}</td><td>${i.unit}</td>
+                <td>${i.qty}</td><td>${anEsc(i.unit)}</td>
                 <td>R$ ${i.unitPrice.toFixed(4).replace('.',',')}</td>
-                <td><strong>R$ ${i.total.toFixed(2).replace('.',',')}</strong></td>
+                <td><strong>${brl(i.total)}</strong></td>
               </tr>`;
             }).join('')}
             <tr style="background:var(--bg-input)">
               <td colspan="6" style="text-align:right;font-weight:700">TOTAL GERAL</td>
-              <td style="font-weight:700;color:var(--green);font-size:15px">R$ ${grandTotal.toFixed(2).replace('.',',')}</td>
+              <td style="font-weight:700;color:var(--green);font-size:15px">${brl(grandTotal)}</td>
             </tr>
           </tbody>
         </table></div>
@@ -1807,13 +1987,20 @@ async function analisarCotacao() {
   }).join('');
 }
 
-function resolveTie(cotId, itemId, respId) {
+async function resolveTie(cotId, itemId, respId) {
   if (!window.ocOverrides) window.ocOverrides = {};
   if (!window.ocOverrides[cotId]) window.ocOverrides[cotId] = {};
   window.ocOverrides[cotId][itemId] = { excluded: false, redirectedToRespId: respId };
   const supp = state.respostas.find(r => r.id === respId);
   toast('Item direcionado para ' + (supp?supp.razaoSocial:'fornecedor #'+respId) + '!');
-  analisarCotacao();
+  renderAnalise(cotId);
+  await persistOverrides(cotId);
+}
+
+async function undoTie(cotId, itemId) {
+  if (window.ocOverrides && window.ocOverrides[cotId]) delete window.ocOverrides[cotId][itemId];
+  renderAnalise(cotId);
+  await persistOverrides(cotId);
 }
 
 // ══ DASHBOARD ══
@@ -1915,7 +2102,7 @@ function downloadCompletoPDF() {
   const bodyRows=(cot.items||[]).map(item=>{
     const row=[item.name,item.qty+' '+item.unit];
     let best=null,bestSupp='—';
-    resps.forEach(r=>{const p=(r.prices||[]).find(p=>p.itemId===item.itemId);if(p&&p.disponivel&&p.price>0){row.push('R$ '+p.price.toFixed(2));if(best===null||p.price<best){best=p.price;bestSupp=r.razaoSocial.split(' ').slice(0,2).join(' ');}}else{row.push('N/D');}});
+    resps.forEach(r=>{const p=(r.prices||[]).find(p=>p.itemId===item.itemId);if(p&&!p.desqualificado&&p.disponivel&&p.price>0){const ep=(p.priceEquiv&&p.priceEquiv>0)?p.priceEquiv:p.price;row.push('R$ '+ep.toFixed(2));if(best===null||ep<best){best=ep;bestSupp=r.razaoSocial.split(' ').slice(0,2).join(' ');}}else{row.push('N/D');}});
     row.push(best?'R$ '+best.toFixed(2):'N/D'); row.push(bestSupp); return row;
   });
   const supplierColW=Math.min(38,Math.floor(180/resps.length));
@@ -1941,7 +2128,7 @@ function downloadCompletoPDF() {
     doc.setTextColor(200,16,46); doc.setFontSize(7.5); doc.setFont('helvetica','bold'); doc.text('FORNECEDOR',109,65);
     doc.setTextColor(40,40,40); doc.setFont('helvetica','normal'); doc.setFontSize(8.5);
     doc.text(resp.razaoSocial.substring(0,40),109,71); doc.text('CNPJ: '+resp.cnpj,109,77); doc.text('Cotacao: '+cot.title,109,82);
-    doc.autoTable({startY:95,head:[['Codigo','Descricao','Tipo','Qtd','Unid.','Preco Unit.','Total (R$)']],body:items.map(i=>[i.code,i.name,i.type==='perecivel'?'Perecivel':'Nao Perecivel',i.qty.toString(),i.unit,'R$ '+i.unitPrice.toFixed(2),'R$ '+i.total.toFixed(2)]),foot:[['','','','','','TOTAL GERAL','R$ '+grandTotal.toFixed(2)]],headStyles:{fillColor:[26,92,58],textColor:255,fontStyle:'bold',fontSize:8.5},footStyles:{fillColor:[200,16,46],textColor:255,fontStyle:'bold',fontSize:10},bodyStyles:{fontSize:8.5},alternateRowStyles:{fillColor:[240,250,244]},columnStyles:{0:{cellWidth:22},1:{cellWidth:58},2:{cellWidth:22},3:{cellWidth:12,halign:'center'},4:{cellWidth:12,halign:'center'},5:{cellWidth:28,halign:'right'},6:{cellWidth:30,halign:'right',fontStyle:'bold'}},margin:{left:10,right:10}});
+    doc.autoTable({startY:95,head:[['Codigo','Descricao','Tipo','Qtd','Unid.','Preco Unit.','Total (R$)']],body:items.map(i=>[i.code,i.name+(i._alterado?' [Valor alterado pelo comprador]':''),i.type==='perecivel'?'Perecivel':'Nao Perecivel',i.qty.toString(),i.unit,'R$ '+i.unitPrice.toFixed(2),'R$ '+i.total.toFixed(2)]),foot:[['','','','','','TOTAL GERAL','R$ '+grandTotal.toFixed(2)]],headStyles:{fillColor:[26,92,58],textColor:255,fontStyle:'bold',fontSize:8.5},footStyles:{fillColor:[200,16,46],textColor:255,fontStyle:'bold',fontSize:10},bodyStyles:{fontSize:8.5},alternateRowStyles:{fillColor:[240,250,244]},columnStyles:{0:{cellWidth:22},1:{cellWidth:58},2:{cellWidth:22},3:{cellWidth:12,halign:'center'},4:{cellWidth:12,halign:'center'},5:{cellWidth:28,halign:'right'},6:{cellWidth:30,halign:'right',fontStyle:'bold'}},margin:{left:10,right:10}});
     const fy=doc.lastAutoTable.finalY;
     doc.setFillColor(255,251,235); doc.setDrawColor(180,130,0); doc.rect(10,fy+8,190,18,'FD');
     doc.setTextColor(60,40,0); doc.setFontSize(8); doc.setFont('helvetica','normal');
@@ -1996,7 +2183,7 @@ function downloadOC(respId, cotId) {
   doc.autoTable({startY:95,head:[['Codigo','Descricao','Tipo','Qtd','Unid.','Preco Unit.','Total (R$)']],
     body:items.map(i=>{
       const hasConv = i.offerUnit && i.offerUnit !== i.unit && i.offerQtyPerUnit;
-      const descExtra = (i._redirected?' [Redirecionado]':'') + (hasConv?' [Conv: '+i.offerQtyPerUnit+i.offerUnit+'/'+i.unit+']':'');
+      const descExtra = (i._redirected?' [Redirecionado]':'') + (i._alterado?' [Valor alterado pelo comprador]':'') + (hasConv?' [Conv: '+i.offerQtyPerUnit+i.offerUnit+'/'+i.unit+']':'');
       return [i.code, i.name+descExtra, i.type==='perecivel'?'Perecivel':'Nao Perecivel', i.qty.toString(), i.unit, 'R$ '+i.unitPrice.toFixed(4), 'R$ '+i.total.toFixed(2)];
     }),
     foot:[['','','','','','TOTAL GERAL','R$ '+grandTotal.toFixed(2)]],
