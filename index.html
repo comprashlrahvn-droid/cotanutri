@@ -658,6 +658,40 @@ canvas{max-width:100%}
   </div>
 </div>
 
+<!-- MODAL: DADOS DA ORDEM DE COMPRA -->
+<div class="modal-overlay" id="modal-oc-dados" style="z-index:1700">
+  <div class="modal" style="max-width:660px">
+    <div class="modal-header">
+      <div class="modal-title">📄 Ordem de Compra — <span id="oc-titulo-forn"></span></div>
+      <button class="btn btn-ghost btn-icon" onclick="closeModal('modal-oc-dados')">✕</button>
+    </div>
+    <div class="modal-body">
+      <input type="hidden" id="oc-resp-id"><input type="hidden" id="oc-cot-id">
+      <div class="form-grid">
+        <div class="form-group"><label>Nº R.C *</label><input type="text" id="oc-numero" oninput="window._ocNumDirty=true"></div>
+        <div class="form-group"><label>Data</label><input type="text" id="oc-data"></div>
+        <div class="form-group"><label>Comprador (nome) *</label><input type="text" id="oc-comprador"></div>
+        <div class="form-group"><label>Centro de Custo</label><input type="text" id="oc-centro"></div>
+        <div class="form-group"><label>Contato</label><input type="text" id="oc-contato"></div>
+        <div class="form-group"><label>Telefone</label><input type="text" id="oc-telefone"></div>
+        <div class="form-group full"><label>E-mail do fornecedor</label><input type="email" id="oc-email"></div>
+        <div class="form-group"><label>Prazo de Entrega</label><input type="text" id="oc-prazo-entrega"></div>
+        <div class="form-group"><label>Forma de Pagamento</label><input type="text" id="oc-forma"></div>
+        <div class="form-group"><label>Prazo de Pagamento</label><input type="text" id="oc-prazo-pgto" placeholder="Ex: 30 DIAS"></div>
+        <div class="form-group"><label>Banco / Agência / Conta</label><input type="text" id="oc-banco"></div>
+        <div class="form-group full"><label>Informações Complementares</label><textarea id="oc-compl" rows="4" style="width:100%;resize:vertical"></textarea></div>
+      </div>
+      <div style="background:var(--bg-input);border-radius:8px;padding:10px 16px;font-size:12px;color:var(--text-muted)">
+        💡 Os dados do fornecedor, o comprador e as informações complementares ficam memorizados para as próximas ordens. O Nº R.C é sugerido em sequência e pode ser editado.
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-ghost" onclick="closeModal('modal-oc-dados')">Cancelar</button>
+      <button class="btn btn-primary" onclick="confirmOCDialog()">⬇️ Gerar PDF</button>
+    </div>
+  </div>
+</div>
+
 <!-- MODAL: NOVO USUÁRIO -->
 <div class="modal-overlay" id="modal-novo-usuario">
   <div class="modal">
@@ -997,8 +1031,9 @@ function setSyncStatus(status, text) {
   txt.textContent = text;
 }
 
-async function apiCall(action, data = {}) {
-  setSyncStatus('syncing', 'Sincronizando...');
+async function _apiCallRaw(action, data = {}, quiet = false) {
+  const st = (s, t) => { if (!quiet) setSyncStatus(s, t); };
+  st('syncing', 'Sincronizando...');
   try {
     const url = APPS_SCRIPT_URL;
     const isRead = action.startsWith('get') || action === 'loginUser';
@@ -1006,7 +1041,7 @@ async function apiCall(action, data = {}) {
       const params = new URLSearchParams({ action, data: encodeURIComponent(JSON.stringify(data)) });
       const res = await fetch(url + '?' + params.toString());
       const json = await res.json();
-      setSyncStatus('ok', 'Sincronizado');
+      st('ok', 'Sincronizado');
       return json;
     } else {
       const payload = JSON.stringify({ action, data });
@@ -1018,7 +1053,7 @@ async function apiCall(action, data = {}) {
           body: payload
         });
         const json = await res.json();
-        setSyncStatus('ok', 'Sincronizado');
+        st('ok', 'Sincronizado');
         return json;
       } catch(e) {
         // Fallback: no-cors garante entrega ao GAS mesmo sem ler a resposta
@@ -1029,29 +1064,59 @@ async function apiCall(action, data = {}) {
             headers: { 'Content-Type': 'text/plain' },
             body: payload
           });
-          setSyncStatus('ok', 'Enviado');
+          st('ok', 'Enviado');
           return { status: 'ok' };
         } catch(e2) {
-          setSyncStatus('error', 'Erro de conexão');
+          st('error', 'Erro de conexão');
           return { status: 'error', message: e2.toString() };
         }
       }
     }
   } catch(e) {
-    setSyncStatus('error', 'Erro de conexão');
+    st('error', 'Erro de conexão');
     return { status: 'error', message: e.toString() };
   }
 }
 
+
+// Controle de gravações em andamento: leituras antigas nunca sobrescrevem alterações recém-feitas
+window._pendingWrites = 0; window._writeSeq = 0; window._ver = {}; window._verOk = false;
+async function apiCall(action, data = {}, opts = {}) {
+  const isRead = action.startsWith('get') || action === 'loginUser';
+  if (!isRead) { window._pendingWrites++; window._writeSeq++; }
+  try {
+    const json = await _apiCallRaw(action, data, !!opts.quiet);
+    if (json && json.ver && json.ver.domain) window._ver[json.ver.domain] = json.ver.ts; // versão da própria gravação: não rebaixar de volta
+    return json;
+  } finally {
+    if (!isRead) window._pendingWrites--;
+  }
+}
+// Serializa gravações do mesmo registro (evita que uma gravação antiga chegue depois da nova)
+function enqueueSave(key, fn) {
+  window._saveQ = window._saveQ || {};
+  window._pendingWrites++; window._writeSeq++;
+  const next = (window._saveQ[key] || Promise.resolve()).catch(() => {}).then(fn);
+  window._saveQ[key] = next;
+  const done = () => { window._pendingWrites--; };
+  next.then(done, done);
+  return next;
+}
+function writesIdleSince(seq) { return window._pendingWrites === 0 && window._writeSeq === seq; }
+
 // ══ SYNC ══
 async function syncAll() {
+  if (window._pendingWrites > 0) return; // há gravações suas em andamento; a próxima sincronização traz tudo
+  const seq = window._writeSeq;
   setSyncStatus('syncing', 'Carregando...');
   try {
-    const [cotRes, respRes, itemsRes] = await Promise.all([
+    const [cotRes, respRes, itemsRes, verRes] = await Promise.all([
       apiCall('getCotacoes'),
       apiCall('getAllRespostas'),
-      apiCall('getItems')
+      apiCall('getItems'),
+      apiCall('getVersions', {}, { quiet: true })
     ]);
+    if (!writesIdleSince(seq)) { setSyncStatus('ok', 'Sincronizado'); return; } // alterou algo durante o carregamento
     if (cotRes.status === 'ok') {
       state.cotacoes = cotRes.cotacoes || [];
       state.nextCotId = state.cotacoes.length ? Math.max(...state.cotacoes.map(c => c.id)) + 1 : 1;
@@ -1062,10 +1127,56 @@ async function syncAll() {
       state.nextItemId = itemsRes.nextItemId || (Math.max(...state.items.map(i => i.id)) + 1);
       saveLocalState();
     }
+    if (verRes && verRes.status === 'ok' && verRes.versions) { window._ver = verRes.versions; window._verOk = true; }
     renderItems(); renderCotacoes(); renderRespostas(); renderDashboard(); updateBadges();
+    if (window._analiseCotId) renderAnalise(window._analiseCotId);
     setSyncStatus('ok', 'Atualizado ' + new Date().toLocaleTimeString('pt-BR', { hour:'2-digit', minute:'2-digit' }));
   } catch(e) {
     setSyncStatus('error', 'Falha ao sincronizar');
+  }
+}
+
+// Verifica a cada poucos segundos (consulta minúscula) se alguém alterou algo; só então recarrega o que mudou
+async function pollVersions() {
+  if (document.hidden || !window._verOk || window._polling || window._pendingWrites > 0) return;
+  window._polling = true;
+  try {
+    const seq = window._writeSeq;
+    const res = await apiCall('getVersions', {}, { quiet: true });
+    if (!res || res.status !== 'ok' || !res.versions || !writesIdleSince(seq)) return;
+    const v = res.versions, old = window._ver || {};
+    const ch = k => v[k] && String(v[k]) !== String(old[k]);
+    const nCot = ch('cotacoes'), nResp = ch('respostas'), nItems = ch('items'), nDec = ch('decisoes');
+    if (!(nCot || nResp || nItems || nDec)) return;
+    const cotAberta = window._analiseCotId;
+    const [cotRes, respRes, itemsRes, ovRes] = await Promise.all([
+      nCot ? apiCall('getCotacoes', {}, { quiet: true }) : null,
+      nResp ? apiCall('getAllRespostas', {}, { quiet: true }) : null,
+      nItems ? apiCall('getItems', {}, { quiet: true }) : null,
+      (nDec && cotAberta) ? fetchOverrides(cotAberta) : null
+    ]);
+    if (!writesIdleSince(seq)) return; // você alterou algo no meio do caminho: tenta de novo no próximo ciclo
+    if (cotRes && cotRes.status === 'ok') {
+      state.cotacoes = cotRes.cotacoes || [];
+      state.nextCotId = state.cotacoes.length ? Math.max(...state.cotacoes.map(c => c.id)) + 1 : 1;
+    }
+    if (respRes && respRes.status === 'ok') state.respostas = respRes.respostas || [];
+    if (itemsRes && itemsRes.status === 'ok' && itemsRes.items && itemsRes.items.length) {
+      state.items = itemsRes.items;
+      state.nextItemId = itemsRes.nextItemId || (Math.max(...state.items.map(i => i.id)) + 1);
+      saveLocalState();
+    }
+    if (ovRes) { window.ocOverrides = window.ocOverrides || {}; window.ocOverrides[cotAberta] = ovRes; writeLocalOverrides(cotAberta); }
+    window._ver = Object.assign({}, old, v);
+    if (nItems) renderItems();
+    if (nCot) renderCotacoes();
+    if (nResp || nCot) { renderRespostas(); renderDashboard(); }
+    updateBadges();
+    if (cotAberta && (nResp || nCot || nDec)) renderAnalise(cotAberta);
+    setSyncStatus('ok', 'Atualizado ' + new Date().toLocaleTimeString('pt-BR', { hour:'2-digit', minute:'2-digit' }));
+  } catch(e) {
+  } finally {
+    window._polling = false;
   }
 }
 
@@ -1283,25 +1394,24 @@ async function saveCotacao() {
     // Modo edição — atualiza cotação existente
     const cotExistente = state.cotacoes.find(c => c.id === editId);
     if (!cotExistente) { toast('Cotação não encontrada', 'error'); btn.disabled=false; return; }
+    const antes = JSON.parse(JSON.stringify(cotExistente));
     cotExistente.title    = title;
     cotExistente.deadline = document.getElementById('cot-deadline').value;
     cotExistente.items    = selectedItems;
 
-    const res = await apiCall('saveCotacao', cotExistente);
+    // Atualização imediata; o envio ao servidor roda em segundo plano (desfaz se falhar)
     btn.disabled = false; btn.textContent = '✓ Salvar Alterações';
-
-    if (res.status === 'ok') {
+    renderCotacoes(); updateBadges();
+    closeModal('modal-cotacao');
+    toast('Cotação atualizada com sucesso!');
+    const analiseSelect = document.getElementById('analise-cotacao-select');
+    if (analiseSelect && parseInt(analiseSelect.value) === editId) populateAnaliseSelect();
+    enqueueSave('cot-' + editId, () => apiCall('saveCotacao', cotExistente)).then(res => {
+      if (res && res.status === 'ok') return;
+      Object.assign(cotExistente, antes);
       renderCotacoes(); updateBadges();
-      closeModal('modal-cotacao');
-      toast('Cotação atualizada com sucesso!');
-      // Atualiza análise se essa cotação estiver aberta
-      const analiseSelect = document.getElementById('analise-cotacao-select');
-      if (analiseSelect && parseInt(analiseSelect.value) === editId) {
-        populateAnaliseSelect();
-      }
-    } else {
-      toast('Erro ao salvar: ' + (res.message || 'tente novamente'), 'error');
-    }
+      toast('Erro ao salvar no servidor — alteração desfeita: ' + ((res && res.message) || 'tente novamente'), 'error');
+    });
   } else {
     // Modo criação
     const cotId = state.nextCotId++;
@@ -1448,11 +1558,12 @@ function maskCNPJ(input) {
 
 // ══ RESPOSTAS ══
 async function loadRespostas(cotacaoId) {
+  const seq = window._writeSeq;
   setSyncStatus('syncing', 'Carregando respostas...');
   const res = cotacaoId
     ? await apiCall('getRespostas', { cotacaoId })
     : await apiCall('getAllRespostas');
-  if (res.status === 'ok') {
+  if (res.status === 'ok' && writesIdleSince(seq)) {
     if (cotacaoId) {
       state.respostas = state.respostas.filter(r => r.cotacaoId !== cotacaoId).concat(res.respostas||[]);
     } else {
@@ -1633,6 +1744,8 @@ async function saveEditResposta() {
   if (!resp) { toast('Resposta não encontrada', 'error'); return; }
 
   const cot = state.cotacoes.find(c => c.id === resp.cotacaoId);
+  const backupPrices = JSON.parse(JSON.stringify(resp.prices||[]));
+  const backupQtys = (cot?.items||[]).map(i => [i.itemId, i.qty]);
   let qtyChanged = false;
 
   resp.prices = (resp.prices||[]).map(p => {
@@ -1655,40 +1768,35 @@ async function saveEditResposta() {
     return np;
   });
 
-  const saveBtn = document.querySelector('#modal-edit-resposta .modal-footer .btn-primary');
-  if (saveBtn) { saveBtn.disabled = true; saveBtn.textContent = 'Salvando...'; }
-
-  // Salva a resposta e, se necessário, a cotação com qtds atualizadas
-  const res = await apiCall('saveResposta', resp);
-  if (res.status === 'ok' && qtyChanged && cot) {
-    await apiCall('saveCotacao', cot);
+  // Atualização imediata: a tela já mostra o resultado; o envio ao servidor roda em segundo plano
+  renderRespostas();
+  closeModal('modal-edit-resposta');
+  toast('Resposta atualizada!');
+  const analiseSelect = document.getElementById('analise-cotacao-select');
+  if (analiseSelect) {
+    populateAnaliseSelect(true);
+    analiseSelect.value = resp.cotacaoId;
+    analisarCotacao();
   }
-
-  if (saveBtn) { saveBtn.disabled = false; saveBtn.textContent = '✓ Salvar Alterações'; }
-
-  if (res.status === 'ok') {
+  const jobs = [enqueueSave('resp-' + resp.id, () => apiCall('saveResposta', resp))];
+  if (qtyChanged && cot) jobs.push(enqueueSave('cot-' + cot.id, () => apiCall('saveCotacao', cot)));
+  Promise.all(jobs).then(rs => {
+    if (rs.every(r => r && r.status === 'ok')) return;
+    resp.prices = backupPrices;
+    (cot?.items||[]).forEach(i => { const b = backupQtys.find(x => x[0] === i.itemId); if (b) i.qty = b[1]; });
     renderRespostas();
-    closeModal('modal-edit-resposta');
-    toast('Resposta atualizada com sucesso!');
-    // Sempre atualiza a aba Análise/Ordens, mesmo que o usuário ainda não tenha acessado a aba
-    const analiseSelect = document.getElementById('analise-cotacao-select');
-    if (analiseSelect) {
-      populateAnaliseSelect();
-      analiseSelect.value = resp.cotacaoId;
-      await analisarCotacao();
-    }
-  } else {
-    toast('Erro ao salvar: ' + (res.message||'Tente novamente.'), 'error');
-  }
+    if (analiseSelect && parseInt(analiseSelect.value) === resp.cotacaoId) renderAnalise(resp.cotacaoId);
+    toast('Erro ao salvar no servidor — alteração desfeita', 'error');
+  });
 }
 
 // ══ ANÁLISE ══
-function populateAnaliseSelect() {
+function populateAnaliseSelect(skipAnalyse) {
   const sel = document.getElementById('analise-cotacao-select');
   const prev = sel.value;
   sel.innerHTML = '<option value="">— Selecione —</option>' + state.cotacoes.map(c => '<option value="'+c.id+'">'+c.title+'</option>').join('');
   if (prev) sel.value = prev;
-  analisarCotacao();
+  if (!skipAnalyse) analisarCotacao();
 }
 
 // ══ AJUSTES DO COMPRADOR + DECISÕES DE EMPATE (persistidas) ══
@@ -1702,14 +1810,17 @@ function writeLocalOverrides(cotId){
   try { const all = readLocalOverrides(); all[cotId] = window.ocOverrides[cotId]||{}; localStorage.setItem(OC_LOCAL_KEY, JSON.stringify(all)); } catch(e){}
 }
 // Carrega as decisões salvas na planilha (se o GAS ainda não foi atualizado, usa o cache do navegador)
-async function loadOverrides(cotId){
+async function fetchOverrides(cotId){
   let loaded = null;
   try {
-    const res = await apiCall('getOverrides', { cotacaoId: cotId });
+    const res = await apiCall('getOverrides', { cotacaoId: cotId }, { quiet: true });
     if (res && res.status === 'ok' && res.overrides && typeof res.overrides === 'object') loaded = res.overrides;
   } catch(e) {}
-  if (!loaded) loaded = readLocalOverrides()[cotId] || {};
-  window.ocOverrides[cotId] = loaded;
+  return loaded || readLocalOverrides()[cotId] || {};
+}
+async function loadOverrides(cotId){
+  window.ocOverrides = window.ocOverrides || {};
+  window.ocOverrides[cotId] = await fetchOverrides(cotId);
   writeLocalOverrides(cotId);
 }
 async function persistOverrides(cotId){
@@ -1746,9 +1857,11 @@ function findPriceEntry(respId, itemId){
 }
 
 async function saveRespostaAnalise(resp){
-  const res = await apiCall('saveResposta', resp);
-  if (!res || res.status !== 'ok') { toast('Erro ao salvar: ' + ((res && res.message)||'Tente novamente.'), 'error'); return false; }
-  return true;
+  return enqueueSave('resp-' + resp.id, async () => {
+    const res = await apiCall('saveResposta', resp);
+    if (!res || res.status !== 'ok') { toast('Erro ao salvar: ' + ((res && res.message)||'Tente novamente.'), 'error'); return false; }
+    return true;
+  });
 }
 
 async function toggleDesqualificarAnalise(respId, itemId){
@@ -1757,9 +1870,10 @@ async function toggleDesqualificarAnalise(respId, itemId){
   const novo = !p.desqualificado;
   if (novo && !confirm('Desqualificar a proposta de ' + r.razaoSocial + ' para este item?')) return;
   p.desqualificado = novo;
-  if (!(await saveRespostaAnalise(r))) { p.desqualificado = !novo; return; }
+  // Atualização imediata; o envio ao servidor roda em segundo plano (desfaz se falhar)
   toast(novo ? 'Proposta desqualificada' : 'Proposta reativada');
   renderAnalise(r.cotacaoId);
+  saveRespostaAnalise(r).then(ok => { if (!ok) { p.desqualificado = !novo; renderAnalise(r.cotacaoId); } });
 }
 
 function openAnaliseEdit(respId, itemId){
@@ -1791,14 +1905,15 @@ async function saveAnaliseEdit(){
   const cotItem = (cot?.items||[]).find(i => i.itemId === itemId);
   const backup = JSON.parse(JSON.stringify(p));
   applyBuyerPrice(p, price, cotItem?.unit || p.unit, obs);
-  const btn = document.getElementById('ae-save-btn');
-  if (btn) { btn.disabled = true; btn.textContent = 'Salvando...'; }
-  const ok = await saveRespostaAnalise(r);
-  if (btn) { btn.disabled = false; btn.textContent = '✓ Salvar'; }
-  if (!ok) { Object.keys(p).forEach(k => delete p[k]); Object.assign(p, backup); return; }
+  // Atualização imediata; o envio ao servidor roda em segundo plano (desfaz se falhar)
   closeModal('modal-analise-edit');
   toast(p.alteradoComprador ? 'Valor alterado e marcado como "alterado pelo comprador"' : 'Valor original do fornecedor restaurado');
   renderAnalise(r.cotacaoId);
+  saveRespostaAnalise(r).then(ok => {
+    if (ok) return;
+    Object.keys(p).forEach(k => delete p[k]); Object.assign(p, backup);
+    renderAnalise(r.cotacaoId);
+  });
 }
 
 function getBestPrices(cotId) {
@@ -1852,18 +1967,34 @@ function getBestPrices(cotId) {
 async function analisarCotacao() {
   const sel = document.getElementById('analise-cotacao-select');
   const cotId = parseInt(sel.value);
-  // Atualização silenciosa: se já está analisando esta cotação, não esconde a tela (mantém a posição)
-  const silent = !!cotId && cotId === window._analiseCotId && !document.getElementById('analise-result').classList.contains('hidden');
-  if (!silent) {
+  const visible = !document.getElementById('analise-result').classList.contains('hidden');
+  const silent = !!cotId && cotId === window._analiseCotId && visible;
+  window.ocOverrides = window.ocOverrides || {};
+  if (!cotId) {
     document.getElementById('analise-result').classList.add('hidden');
     document.getElementById('analise-empty').classList.remove('hidden');
     document.getElementById('analise-empty').querySelector('h3').textContent = 'Selecione uma cotação para análise';
     window._analiseCotId = null;
+    return;
   }
-  if (!cotId) return;
-  await loadRespostas(cotId);
-  await loadOverrides(cotId);
+  // 1) mostra imediatamente o que já está em memória
+  const hasCache = state.respostas.some(r => r.cotacaoId === cotId) && !!window.ocOverrides[cotId];
+  if (hasCache) {
+    renderAnalise(cotId);
+  } else if (!silent) {
+    document.getElementById('analise-result').classList.add('hidden');
+    document.getElementById('analise-empty').classList.remove('hidden');
+    document.getElementById('analise-empty').querySelector('h3').textContent = 'Carregando análise...';
+    window._analiseCotId = null;
+  }
+  // 2) confere o servidor (respostas e decisões em paralelo) e atualiza se algo mudou
+  const seq = window._writeSeq;
+  const [rRes, ov] = await Promise.all([ apiCall('getRespostas', { cotacaoId: cotId }), fetchOverrides(cotId) ]);
   if (parseInt(sel.value) !== cotId) return; // usuário trocou de cotação durante o carregamento
+  if (!writesIdleSince(seq)) { if (!hasCache) renderAnalise(cotId); return; } // alterações suas em andamento: não sobrescreve a tela
+  if (rRes && rRes.status === 'ok') state.respostas = state.respostas.filter(r => r.cotacaoId !== cotId).concat(rRes.respostas || []);
+  window.ocOverrides[cotId] = ov; writeLocalOverrides(cotId);
+  renderRespostas(); updateBadges();
   renderAnalise(cotId);
 }
 
@@ -2162,67 +2293,247 @@ function downloadCompletoPDF() {
   toast('PDF completo gerado!');
 }
 
-function downloadOC(respId, cotId) {
-  const {jsPDF} = window.jspdf;
-  const doc = new jsPDF({orientation:'portrait',unit:'mm',format:'a4'});
-  const ordens=window._ordensData; const cot=window._currentCot;
-  if (!ordens||!ordens[respId]) { toast('Dados não encontrados','error'); return; }
-  const {resp,items}=ordens[respId];
-  const grandTotal=items.reduce((s,i)=>s+i.total,0);
-  const now=new Date();
-  const ocId='OC-'+cotId+'-'+respId+'-'+now.getFullYear();
-  const today=now.toLocaleDateString('pt-BR');
-  const dd=String(now.getDate()).padStart(2,'0'), mm=String(now.getMonth()+1).padStart(2,'0'), yyyy=now.getFullYear();
-  const suppName=resp.razaoSocial.toUpperCase().replace(/[^A-Z0-9\s]/g,'').replace(/\s+/g,' ').trim();
-  const fileName='OC '+suppName+' '+dd+mm+yyyy+'.pdf';
-  doc.setFillColor(26,92,58); doc.rect(0,0,210,52,'F');
-  doc.setTextColor(255,255,255); doc.setFontSize(16); doc.setFont('helvetica','bold');
-  doc.text('Associacao Hospitalar Vila Nova',14,16);
-  doc.setFontSize(8.5); doc.setFont('helvetica','normal');
-  doc.text('CNPJ: 04.994.418/0009-70',14,23); doc.text('Rua Osvaldo Cruz, 116, Bela Vista - Campo Bom',14,29); doc.text('CEP 93704-814',14,35);
-  doc.setFontSize(11); doc.setFont('helvetica','bold'); doc.text('ORDEM DE COMPRA',14,44);
-  doc.setFontSize(8); doc.setFont('helvetica','normal'); doc.text('No: '+ocId,165,16); doc.text('Data: '+today,165,22);
-  doc.setFillColor(200,16,46); doc.rect(0,52,210,3,'F');
-  doc.setFillColor(240,253,244); doc.rect(10,59,90,30,'F');
-  doc.setDrawColor(26,92,58); doc.setLineWidth(0.4); doc.rect(10,59,90,30);
-  doc.setTextColor(26,92,58); doc.setFontSize(7.5); doc.setFont('helvetica','bold'); doc.text('EMITENTE',14,65);
-  doc.setTextColor(40,40,40); doc.setFont('helvetica','normal'); doc.setFontSize(8.5);
-  doc.text('Assoc. Hospitalar Vila Nova',14,71); doc.text('CNPJ: 04.994.418/0009-70',14,77);
-  doc.text('Rua Osvaldo Cruz, 116 - Campo Bom',14,82); doc.text('CEP 93704-814',14,87);
-  doc.setFillColor(255,245,245); doc.rect(105,59,95,30,'F');
-  doc.setDrawColor(200,16,46); doc.rect(105,59,95,30);
-  doc.setTextColor(200,16,46); doc.setFontSize(7.5); doc.setFont('helvetica','bold'); doc.text('FORNECEDOR',109,65);
-  doc.setTextColor(40,40,40); doc.setFont('helvetica','normal'); doc.setFontSize(8.5);
-  doc.text(resp.razaoSocial.substring(0,40),109,71); doc.text('CNPJ: '+resp.cnpj,109,77);
-  doc.text('Cotacao: '+cot.title,109,82); if(resp.contato)doc.text('Contato: '+resp.contato,109,87);
-  doc.autoTable({startY:95,head:[['Codigo','Descricao','Tipo','Qtd','Unid.','Preco Unit.','Total (R$)']],
-    body:items.map(i=>{
-      const hasConv = i.offerUnit && i.offerUnit !== i.unit && i.offerQtyPerUnit;
-      const descExtra = (i._redirected?' [Redirecionado]':'') + (i._alterado?' [Valor alterado pelo comprador]':'') + (hasConv?' [Conv: '+i.offerQtyPerUnit+i.offerUnit+'/'+i.unit+']':'');
-      return [i.code, i.name+descExtra, i.type==='perecivel'?'Perecivel':'Nao Perecivel', i.qty.toString(), i.unit, 'R$ '+i.unitPrice.toFixed(4), 'R$ '+i.total.toFixed(2)];
-    }),
-    foot:[['','','','','','TOTAL GERAL','R$ '+grandTotal.toFixed(2)]],
-    headStyles:{fillColor:[26,92,58],textColor:255,fontStyle:'bold',fontSize:8.5},
-    footStyles:{fillColor:[200,16,46],textColor:255,fontStyle:'bold',fontSize:10},
-    bodyStyles:{fontSize:8},alternateRowStyles:{fillColor:[240,250,244]},
-    columnStyles:{0:{cellWidth:22},1:{cellWidth:56},2:{cellWidth:22},3:{cellWidth:12,halign:'center'},4:{cellWidth:12,halign:'center'},5:{cellWidth:30,halign:'right'},6:{cellWidth:30,halign:'right',fontStyle:'bold'}},
-    margin:{left:10,right:10}});
-  const fy=doc.lastAutoTable.finalY;
-  doc.setFillColor(255,251,235); doc.setDrawColor(180,130,0); doc.rect(10,fy+8,190,18,'FD');
-  doc.setTextColor(60,40,0); doc.setFontSize(8); doc.setFont('helvetica','normal');
-  doc.text('ENTREGA DE MERCADORIAS DE SEGUNDA A SEXTA DAS 07:30H AS 11:00H',14,fy+14);
-  doc.text('FUNDOS DO HOSPITAL, SETOR DE NUTRICAO.',14,fy+20);
-  const sigY=fy+36;
-  doc.setDrawColor(160,160,160); doc.line(14,sigY,84,sigY); doc.line(126,sigY,196,sigY);
-  doc.setFontSize(8); doc.setTextColor(100,100,100);
-  doc.text('Comprador / Responsavel',30,sigY+5); doc.text('Fornecedor / Representante',144,sigY+5);
-  doc.setFillColor(26,92,58); doc.rect(0,282,210,15,'F');
-  doc.setTextColor(255,255,255); doc.setFontSize(7);
-  doc.text('Associacao Hospitalar Vila Nova  |  Sistema de Cotacao de Insumos  |  Campo Bom - RS',105,289,{align:'center'});
-  doc.text('Documento gerado em '+today+' — '+ocId,105,294,{align:'center'});
-  doc.save(fileName);
-  toast('PDF gerado: '+fileName);
+// ══ ORDEM DE COMPRA — NOVO MODELO (PDF) ══
+const OC_LOGO_B64 = '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';
+function ocMoney(v){ return Number(v||0).toLocaleString('pt-BR',{minimumFractionDigits:2,maximumFractionDigits:2}); }
+function ocUnitFmt(v){ return Number(v||0).toLocaleString('pt-BR',{minimumFractionDigits:2,maximumFractionDigits:4}); }
+
+// d = { numero, data, comprador, centroCusto, empresa, cnpj, contato, telefone, email,
+//       itens:[{code,name,qty,unit,unitPrice,total,nota}], prazoEntrega, formaPgto, prazoPgto, banco, complementares }
+function drawOCPdf(doc, d) {
+  const L = 10, R = 200;
+  const dash = v => (v && String(v).trim()) ? String(v).trim() : '—';
+  const BLACK = [17,17,17], GREEN = [31,77,50];
+  doc.setTextColor(...BLACK);
+
+  // Cabeçalho
+  doc.addImage('data:image/jpeg;base64,' + OC_LOGO_B64, 'JPEG', 12.5, 10.5, 44, 13.9);
+  doc.setFont('helvetica','bold'); doc.setFontSize(17);
+  doc.text('Ordem de Compra', R - 3, 18.8, { align: 'right' });
+  doc.setFont('helvetica','normal'); doc.setFontSize(7.5); doc.setTextColor(110,110,110);
+  ['Associação Hospitalar Vila Nova','CNPJ: 04.994.418/0009-70','Rua Osvaldo Cruz, 116, Bela Vista','Cep:93704-814 - Campo Bom - RS','Tel: (51) 3191-3602']
+    .forEach((t,i) => doc.text(t, R - 3, 23.6 + i * 4.3, { align: 'right' }));
+  doc.setDrawColor(0,0,0); doc.setLineWidth(0.7); doc.line(L, 48, R, 48);
+
+  const section = (title, y) => {
+    doc.setDrawColor(0,0,0); doc.setLineWidth(0.3);
+    doc.line(L, y, R, y);
+    doc.setFont('helvetica','bold'); doc.setFontSize(7.5); doc.setTextColor(...BLACK);
+    doc.text(title, L + 0.5, y + 3.7);
+    doc.line(L, y + 5.4, R, y + 5.4);
+    return y + 5.4;
+  };
+  const field = (label, val, x, yb) => {
+    doc.setFont('helvetica','bold'); doc.setFontSize(7.5); doc.setTextColor(...BLACK);
+    doc.text(label, x, yb);
+    const w = doc.getTextWidth(label);
+    doc.setFont('helvetica','normal');
+    doc.text(String(val), x + w + 1.8, yb);
+  };
+  const rowLine = y => { doc.setDrawColor(224,224,224); doc.setLineWidth(0.15); doc.line(L, y, R, y); };
+  const ROW = 5.2;
+
+  // Departamento solicitante
+  let y = section('DEPARTAMENTO SOLICITANTE', 51.5);
+  field('Nº R.C:', dash(d.numero), L + 0.5, y + 3.6); field('Data:', dash(d.data), 82, y + 3.6);
+  rowLine(y + ROW); y += ROW;
+  field('Nome:', dash(d.comprador), L + 0.5, y + 3.6); field('Centro de Custo:', dash(d.centroCusto), 82, y + 3.6);
+  rowLine(y + ROW); y += ROW;
+
+  // Fornecedor
+  y = section('INFORMAÇÕES DO FORNECEDOR', y + 4.2);
+  field('Empresa:', dash(d.empresa), L + 0.5, y + 3.6); field('CNPJ:', dash(d.cnpj), 114, y + 3.6);
+  rowLine(y + ROW); y += ROW;
+  field('Contato:', dash(d.contato), L + 0.5, y + 3.6); field('Telefone:', dash(d.telefone), 114, y + 3.6);
+  rowLine(y + ROW); y += ROW;
+  field('Email:', dash(d.email), L + 0.5, y + 3.6);
+  rowLine(y + ROW); y += ROW;
+
+  // Itens
+  y = section('ITENS DO PEDIDO', y + 4.2);
+  doc.autoTable({
+    startY: y + 3, margin: { left: L, right: 210 - R, bottom: 22 },
+    head: [['CÓDIGO','DESCRIÇÃO','QTD','R$ UNIT','R$ TOTAL']],
+    body: d.itens.map(i => [
+      i.code || '',
+      i.name + (i.nota ? '\n' + i.nota : ''),
+      (i.qty != null ? String(i.qty) : '') + (i.unit ? ' ' + i.unit : ''),
+      ocUnitFmt(i.unitPrice),
+      ocMoney(i.total)
+    ]),
+    theme: 'plain',
+    styles: { font: 'helvetica', fontSize: 7.5, textColor: BLACK, cellPadding: { top: 2.3, bottom: 2.3, left: 2, right: 2 }, valign: 'middle' },
+    headStyles: { fillColor: [238,238,238], textColor: [138,148,166], fontStyle: 'bold', fontSize: 7, lineColor: [40,40,40], lineWidth: { bottom: 0.3 } },
+    bodyStyles: { lineColor: [224,224,224], lineWidth: { bottom: 0.15 } },
+    columnStyles: {
+      0: { cellWidth: 22 },
+      1: { cellWidth: 80 },
+      2: { cellWidth: 22, halign: 'center' },
+      3: { cellWidth: 24, halign: 'center' },
+      4: { cellWidth: 42, halign: 'left', fontStyle: 'bold' }
+    },
+    tableLineColor: [40,40,40], tableLineWidth: 0.3,
+    didParseCell: h => { if (h.section === 'head' && h.column.index >= 2 && h.column.index <= 3) h.cell.styles.halign = 'center'; }
+  });
+
+  y = doc.lastAutoTable.finalY;
+  const total = d.itens.reduce((s,i) => s + (i.total || 0), 0);
+  if (y + 82 > 288) { doc.addPage(); y = 14; }
+
+  // Subtotal / Total
+  doc.setFont('helvetica','normal'); doc.setFontSize(7.5); doc.setTextColor(...BLACK);
+  doc.text('Subtotal:', 150.5, y + 6.6, { align: 'right' });
+  doc.text('R$ ' + ocMoney(total), R - 4.6, y + 6.6, { align: 'right' });
+  doc.setFillColor(...GREEN); doc.rect(121, y + 9.2, 76, 7.2, 'F');
+  doc.setFont('helvetica','bold'); doc.setFontSize(9); doc.setTextColor(255,255,255);
+  doc.text('TOTAL:', 145.5, y + 14.1, { align: 'center' });
+  doc.text('R$ ' + ocMoney(total), R - 5, y + 14.1, { align: 'right' });
+
+  // Caixas
+  const by = y + 23, bh = 37.4;
+  doc.setDrawColor(0,0,0); doc.setLineWidth(0.4);
+  doc.rect(L, by, 92, bh); doc.rect(108, by, 92, bh);
+  doc.setTextColor(...BLACK); doc.setFont('helvetica','bold'); doc.setFontSize(8);
+  doc.text('Condições de Pagamento', L + 5.6, by + 6.3);
+  doc.text('Informações Complementares', 108 + 5.6, by + 6.3);
+  doc.setLineWidth(0.3);
+  doc.line(L + 5.6, by + 10.3, L + 88.8, by + 10.3);
+  doc.line(108 + 5.6, by + 10.3, 108 + 88.8, by + 10.3);
+  [['Prazo Entrega:', d.prazoEntrega ? d.prazoEntrega : '—'],
+   ['Forma de Pagamento:', d.formaPgto || ''],
+   ['Prazo de Pagamento:', d.prazoPgto || ''],
+   ['Banco / Agência / Conta:', d.banco || '']].forEach((f,i) => field(f[0], f[1], L + 5.6, by + 14.6 + i * 5.1));
+  doc.setFont('helvetica','normal'); doc.setFontSize(7); doc.setTextColor(...BLACK);
+  const compl = doc.splitTextToSize(String(d.complementares || ''), 80).slice(0, 12);
+  compl.forEach((t,i) => doc.text(t, 108 + 5.6, by + 14.6 + i * 4.3));
+
+  // Comprador
+  doc.setFont('helvetica','bold'); doc.setFontSize(8); doc.setTextColor(...GREEN);
+  doc.text('COMPRADOR: ' + String(d.comprador || '').toUpperCase(), 105, by + bh + 7.8, { align: 'center' });
+
+  // Rodapé (todas as páginas)
+  const pages = doc.getNumberOfPages();
+  for (let p = 1; p <= pages; p++) {
+    doc.setPage(p);
+    doc.setFont('helvetica','normal'); doc.setFontSize(6); doc.setTextColor(150,150,150);
+    doc.text('Documento gerado em ' + d.data + ' — A.H. Vila Nova', 105, doc.internal.pageSize.getHeight() - 18, { align: 'center' });
+  }
 }
+
+// ══ ORDEM DE COMPRA — diálogo de dados + geração do PDF ══
+const OC_PREF_KEY = 'vn-oc-prefs-v1';
+const OC_COUNTER_KEY = 'vn-oc-counter-v1';
+const OC_DEFAULT_COMPL = 'ENTREGA: SEGUNDA À SEXTA\n08:15h–11:30h e 13:15h–16:00h\nFUNDOS DO HOSPITAL — RECEPÇÃO 3\nNÃO ENVIAR COM CAMINHÃO TRUCK/BI-TRUCK';
+function ocPrefs(){ try { return JSON.parse(localStorage.getItem(OC_PREF_KEY)||'{}'); } catch(e){ return {}; } }
+function ocSavePrefs(p){ try { localStorage.setItem(OC_PREF_KEY, JSON.stringify(p)); } catch(e){} }
+function ocNum(n, year){ return 'OC-' + String(n).padStart(4,'0') + '-' + year; }
+function ocLocalLast(year){ try { const c = JSON.parse(localStorage.getItem(OC_COUNTER_KEY)||'{}'); return c.year === year ? (c.last||0) : 0; } catch(e){ return 0; } }
+async function ocServerLast(year){
+  try {
+    const res = await apiCall('getOverrides', { cotacaoId: '_oc_counter' }, { quiet: true });
+    const o = res && res.overrides;
+    if (o && o.year === year) return o.last || 0;
+  } catch(e) {}
+  return 0;
+}
+function ocCommitCounter(n, year){
+  try { localStorage.setItem(OC_COUNTER_KEY, JSON.stringify({ year, last: n })); } catch(e){}
+  apiCall('saveOverrides', { cotacaoId: '_oc_counter', overrides: { year, last: n } }, { quiet: true }).catch(() => {});
+}
+
+async function openOCDialog(respId, cotId){
+  const ordens = window._ordensData;
+  if (!ordens || !ordens[respId]) { toast('Dados não encontrados', 'error'); return; }
+  const resp = ordens[respId].resp;
+  const year = new Date().getFullYear();
+  const prefs = ocPrefs();
+  const sup = (prefs.suppliers || {})[String(resp.cnpj||'').replace(/\D/g,'')] || {};
+  const saved = ((((window.ocOverrides||{})[cotId]||{})._oc)||{})[respId] || {};
+  const pick = (k, def) => saved[k] !== undefined ? saved[k] : (sup[k] !== undefined ? sup[k] : def);
+  const defComprador = (typeof currentUser !== 'undefined' && currentUser && currentUser.nome && currentUser.nome !== 'Administrador') ? currentUser.nome : '';
+  const set = (id, v) => { document.getElementById(id).value = (v == null ? '' : v); };
+  set('oc-resp-id', respId); set('oc-cot-id', cotId);
+  set('oc-numero', saved.numero || ocNum(ocLocalLast(year) + 1, year));
+  window._ocNumDirty = !!saved.numero;
+  set('oc-data', saved.data || new Date().toLocaleDateString('pt-BR'));
+  set('oc-comprador', saved.comprador !== undefined ? saved.comprador : (prefs.comprador !== undefined ? prefs.comprador : defComprador));
+  set('oc-centro', saved.centroCusto !== undefined ? saved.centroCusto : (prefs.centroCusto !== undefined ? prefs.centroCusto : 'COMPRAS'));
+  set('oc-contato', pick('contato', resp.contato || ''));
+  set('oc-telefone', pick('telefone', ''));
+  set('oc-email', pick('email', ''));
+  set('oc-prazo-entrega', pick('prazoEntrega', ''));
+  set('oc-forma', pick('formaPgto', ''));
+  set('oc-prazo-pgto', pick('prazoPgto', ''));
+  set('oc-banco', pick('banco', ''));
+  set('oc-compl', saved.complementares !== undefined ? saved.complementares : (prefs.complementares !== undefined ? prefs.complementares : OC_DEFAULT_COMPL));
+  document.getElementById('oc-titulo-forn').textContent = resp.razaoSocial;
+  openModal('modal-oc-dados');
+  // Refina o nº com o contador compartilhado (servidor), se o usuário ainda não mexeu no campo
+  if (!saved.numero) {
+    ocServerLast(year).then(last => {
+      if (window._ocNumDirty) return;
+      set('oc-numero', ocNum(Math.max(last, ocLocalLast(year)) + 1, year));
+    });
+  }
+}
+
+function confirmOCDialog(){
+  const g = id => document.getElementById(id).value.trim();
+  const respId = parseInt(g('oc-resp-id')), cotId = parseInt(g('oc-cot-id'));
+  const ordens = window._ordensData;
+  if (!ordens || !ordens[respId]) { toast('Dados não encontrados', 'error'); return; }
+  const { resp, items } = ordens[respId];
+  const numero = g('oc-numero'), comprador = g('oc-comprador');
+  if (!numero) { toast('Informe o Nº R.C', 'error'); return; }
+  if (!comprador) { toast('Informe o nome do comprador', 'error'); return; }
+  const rec = {
+    numero, data: g('oc-data'), comprador, centroCusto: g('oc-centro'),
+    contato: g('oc-contato'), telefone: g('oc-telefone'), email: g('oc-email'),
+    prazoEntrega: g('oc-prazo-entrega'), formaPgto: g('oc-forma'), prazoPgto: g('oc-prazo-pgto'), banco: g('oc-banco'),
+    complementares: document.getElementById('oc-compl').value.trim()
+  };
+  // Memoriza para as próximas OCs (comprador/centro de custo/complementares e dados do fornecedor)
+  const prefs = ocPrefs();
+  prefs.comprador = rec.comprador; prefs.centroCusto = rec.centroCusto; prefs.complementares = rec.complementares;
+  prefs.suppliers = prefs.suppliers || {};
+  prefs.suppliers[String(resp.cnpj||'').replace(/\D/g,'')] = {
+    contato: rec.contato, telefone: rec.telefone, email: rec.email,
+    prazoEntrega: rec.prazoEntrega, formaPgto: rec.formaPgto, prazoPgto: rec.prazoPgto, banco: rec.banco
+  };
+  ocSavePrefs(prefs);
+  // Guarda na cotação (o mesmo nº volta ao baixar de novo) e atualiza o contador — em segundo plano
+  window.ocOverrides = window.ocOverrides || {};
+  const ov = window.ocOverrides[cotId] = window.ocOverrides[cotId] || {};
+  ov._oc = ov._oc || {}; ov._oc[respId] = rec;
+  persistOverrides(cotId);
+  const m = numero.match(/^OC-(\d+)-(\d{4})$/);
+  if (m) { const yr = parseInt(m[2]), n = parseInt(m[1]); if (n > ocLocalLast(yr)) ocCommitCounter(n, yr); }
+
+  const { jsPDF } = window.jspdf;
+  const doc = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
+  drawOCPdf(doc, {
+    numero: rec.numero, data: rec.data, comprador: rec.comprador, centroCusto: rec.centroCusto,
+    empresa: resp.razaoSocial, cnpj: resp.cnpj, contato: rec.contato, telefone: rec.telefone, email: rec.email,
+    prazoEntrega: rec.prazoEntrega, formaPgto: rec.formaPgto, prazoPgto: rec.prazoPgto, banco: rec.banco,
+    complementares: rec.complementares,
+    itens: items.map(i => {
+      const hasConv = i.offerUnit && i.offerUnit !== i.unit && i.offerQtyPerUnit;
+      const notas = [];
+      if (i._alterado) notas.push('[Valor alterado pelo comprador]');
+      if (hasConv) notas.push('[Conv: ' + i.offerQtyPerUnit + i.offerUnit + '/' + i.unit + ']');
+      return { code: i.code, name: i.name, qty: i.qty, unit: i.unit, unitPrice: i.unitPrice, total: i.total, nota: notas.join(' ') };
+    })
+  });
+  const now = new Date();
+  const ddmmyyyy = String(now.getDate()).padStart(2,'0') + String(now.getMonth()+1).padStart(2,'0') + now.getFullYear();
+  const suppName = String(resp.razaoSocial||'').toUpperCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/[^A-Z0-9\s]/g,'').replace(/\s+/g,'_').substring(0,30);
+  const fileName = 'OC_' + suppName + '_' + ddmmyyyy + '.pdf';
+  doc.save(fileName);
+  closeModal('modal-oc-dados');
+  toast('PDF gerado: ' + fileName);
+}
+
+function downloadOC(respId, cotId) { openOCDialog(respId, cotId); }
 
 // ══ PÁGINA DO FORNECEDOR ══
 function showErrorPage(msg) {
@@ -2427,7 +2738,10 @@ async function initApp() {
     setSyncStatus('error', 'Sem conexão');
   }
   document.getElementById('global-loading').style.display = 'none';
-  setInterval(syncAll, 60000);
+  setInterval(pollVersions, 10000);   // detecta alterações de outros usuários em poucos segundos
+  setInterval(syncAll, 90000);        // sincronização completa de segurança
+  document.addEventListener('visibilitychange', () => { if (!document.hidden) pollVersions(); });
+  window.addEventListener('focus', pollVersions);
 }
 
 init();
