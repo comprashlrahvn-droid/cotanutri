@@ -2257,38 +2257,37 @@ function downloadCompletoPDF() {
   colStyles[2+resps.length]={cellWidth:26,halign:'right',fontStyle:'bold'};
   colStyles[3+resps.length]={cellWidth:40};
   doc.autoTable({startY:60,head:[headerRow],body:bodyRows,headStyles:{fillColor:[26,92,58],textColor:255,fontStyle:'bold',fontSize:7.5},bodyStyles:{fontSize:7.5},alternateRowStyles:{fillColor:[240,250,244]},columnStyles:colStyles,margin:{left:10,right:10}});
+  // Ordens de compra no novo modelo (mesmo das OCs individuais; usa os dados salvos de cada OC)
+  window.ocOverrides = window.ocOverrides || {};
+  const ov = window.ocOverrides[cotId] = window.ocOverrides[cotId] || {};
+  ov._oc = ov._oc || {};
+  const prefs = ocPrefs();
+  const precisaComprador = Object.values(ordensMap).some(({resp}) => !(ov._oc[resp.id] && ov._oc[resp.id].comprador));
+  if (precisaComprador && !prefs.comprador) {
+    const padrao = (typeof currentUser !== 'undefined' && currentUser && currentUser.nome && currentUser.nome !== 'Administrador') ? currentUser.nome : '';
+    const nome = prompt('Nome do comprador que aparecerá nas ordens de compra:', padrao);
+    if (nome && nome.trim()) { prefs.comprador = nome.trim(); ocSavePrefs(prefs); }
+  }
+  let ultimoNum = ocLocalLast(yyyy), novasOCs = false;
   Object.values(ordensMap).forEach(({resp,items})=>{
+    let rec = ov._oc[resp.id];
+    if (!rec) {
+      const sup = (prefs.suppliers || {})[String(resp.cnpj||'').replace(/\D/g,'')] || {};
+      ultimoNum += 1;
+      rec = {
+        numero: ocNum(ultimoNum, yyyy), data: today, comprador: prefs.comprador || '',
+        centroCusto: prefs.centroCusto !== undefined ? prefs.centroCusto : 'COMPRAS',
+        contato: sup.contato !== undefined ? sup.contato : (resp.contato || ''),
+        telefone: sup.telefone || '', email: sup.email || '', prazoEntrega: sup.prazoEntrega || '',
+        formaPgto: sup.formaPgto || '', prazoPgto: sup.prazoPgto || '', banco: sup.banco || '',
+        complementares: prefs.complementares !== undefined ? prefs.complementares : OC_DEFAULT_COMPL
+      };
+      ov._oc[resp.id] = rec; novasOCs = true;
+    }
     doc.addPage('a4','portrait');
-    const grandTotal=items.reduce((s,i)=>s+i.total,0);
-    const ocId='OC-'+cotId+'-'+resp.id+'-'+yyyy;
-    doc.setFillColor(26,92,58); doc.rect(0,0,210,52,'F');
-    doc.setTextColor(255,255,255); doc.setFontSize(16); doc.setFont('helvetica','bold');
-    doc.text('Associacao Hospitalar Vila Nova',14,16);
-    doc.setFontSize(8.5); doc.setFont('helvetica','normal');
-    doc.text('CNPJ: 04.994.418/0009-70',14,23); doc.text('Rua Osvaldo Cruz, 116, Bela Vista - Campo Bom',14,29);
-    doc.setFontSize(11); doc.setFont('helvetica','bold'); doc.text('ORDEM DE COMPRA',14,44);
-    doc.setFontSize(8); doc.setFont('helvetica','normal'); doc.text('No: '+ocId,165,16); doc.text('Data: '+today,165,22);
-    doc.setFillColor(200,16,46); doc.rect(0,52,210,3,'F');
-    doc.setFillColor(255,245,245); doc.rect(105,59,95,30,'F');
-    doc.setDrawColor(200,16,46); doc.setLineWidth(0.4); doc.rect(105,59,95,30);
-    doc.setTextColor(200,16,46); doc.setFontSize(7.5); doc.setFont('helvetica','bold'); doc.text('FORNECEDOR',109,65);
-    doc.setTextColor(40,40,40); doc.setFont('helvetica','normal'); doc.setFontSize(8.5);
-    doc.text(resp.razaoSocial.substring(0,40),109,71); doc.text('CNPJ: '+resp.cnpj,109,77); doc.text('Cotacao: '+cot.title,109,82);
-    doc.autoTable({startY:95,head:[['Codigo','Descricao','Tipo','Qtd','Unid.','Preco Unit.','Total (R$)']],body:items.map(i=>[i.code,i.name+(i._alterado?' [Valor alterado pelo comprador]':''),i.type==='perecivel'?'Perecivel':'Nao Perecivel',i.qty.toString(),i.unit,'R$ '+i.unitPrice.toFixed(2),'R$ '+i.total.toFixed(2)]),foot:[['','','','','','TOTAL GERAL','R$ '+grandTotal.toFixed(2)]],headStyles:{fillColor:[26,92,58],textColor:255,fontStyle:'bold',fontSize:8.5},footStyles:{fillColor:[200,16,46],textColor:255,fontStyle:'bold',fontSize:10},bodyStyles:{fontSize:8.5},alternateRowStyles:{fillColor:[240,250,244]},columnStyles:{0:{cellWidth:22},1:{cellWidth:58},2:{cellWidth:22},3:{cellWidth:12,halign:'center'},4:{cellWidth:12,halign:'center'},5:{cellWidth:28,halign:'right'},6:{cellWidth:30,halign:'right',fontStyle:'bold'}},margin:{left:10,right:10}});
-    const fy=doc.lastAutoTable.finalY;
-    doc.setFillColor(255,251,235); doc.setDrawColor(180,130,0); doc.rect(10,fy+8,190,18,'FD');
-    doc.setTextColor(60,40,0); doc.setFontSize(8); doc.setFont('helvetica','normal');
-    doc.text('ENTREGA DE MERCADORIAS DE SEGUNDA A SEXTA DAS 07:30H AS 11:00H',14,fy+14);
-    doc.text('FUNDOS DO HOSPITAL, SETOR DE NUTRICAO.',14,fy+20);
-    const sigY=fy+36;
-    doc.setDrawColor(160,160,160); doc.line(14,sigY,84,sigY); doc.line(126,sigY,196,sigY);
-    doc.setFontSize(8); doc.setTextColor(100,100,100);
-    doc.text('Comprador / Responsavel',30,sigY+5); doc.text('Fornecedor / Representante',144,sigY+5);
-    doc.setFillColor(26,92,58); doc.rect(0,282,210,15,'F');
-    doc.setTextColor(255,255,255); doc.setFontSize(7);
-    doc.text('Associacao Hospitalar Vila Nova  |  Sistema de Cotacao de Insumos  |  Campo Bom - RS',105,289,{align:'center'});
-    doc.text('Documento gerado em '+today+' — '+ocId,105,294,{align:'center'});
+    drawOCPdf(doc, ocBuildData(resp, items, rec));
   });
+  if (novasOCs) { persistOverrides(cotId); ocCommitCounter(ultimoNum, yyyy); }
   doc.save('Completo_'+cot.title.replace(/[^a-zA-Z0-9]/g,'_')+'_'+dd+mm+yyyy+'.pdf');
   toast('PDF completo gerado!');
 }
@@ -2301,6 +2300,7 @@ function ocUnitFmt(v){ return Number(v||0).toLocaleString('pt-BR',{minimumFracti
 // d = { numero, data, comprador, centroCusto, empresa, cnpj, contato, telefone, email,
 //       itens:[{code,name,qty,unit,unitPrice,total,nota}], prazoEntrega, formaPgto, prazoPgto, banco, complementares }
 function drawOCPdf(doc, d) {
+  const startPage = doc.getNumberOfPages(); // a OC começa na página atual (no PDF completo vem depois do comparativo)
   const L = 10, R = 200;
   const dash = v => (v && String(v).trim()) ? String(v).trim() : '—';
   const BLACK = [17,17,17], GREEN = [31,77,50];
@@ -2378,7 +2378,7 @@ function drawOCPdf(doc, d) {
 
   y = doc.lastAutoTable.finalY;
   const total = d.itens.reduce((s,i) => s + (i.total || 0), 0);
-  if (y + 82 > 288) { doc.addPage(); y = 14; }
+  if (y + 82 > 288) { doc.addPage('a4', 'portrait'); y = 14; }
 
   // Subtotal / Total
   doc.setFont('helvetica','normal'); doc.setFontSize(7.5); doc.setTextColor(...BLACK);
@@ -2413,7 +2413,7 @@ function drawOCPdf(doc, d) {
 
   // Rodapé (todas as páginas)
   const pages = doc.getNumberOfPages();
-  for (let p = 1; p <= pages; p++) {
+  for (let p = startPage; p <= pages; p++) {
     doc.setPage(p);
     doc.setFont('helvetica','normal'); doc.setFontSize(6); doc.setTextColor(150,150,150);
     doc.text('Documento gerado em ' + d.data + ' — A.H. Vila Nova', 105, doc.internal.pageSize.getHeight() - 18, { align: 'center' });
@@ -2511,19 +2511,7 @@ function confirmOCDialog(){
 
   const { jsPDF } = window.jspdf;
   const doc = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
-  drawOCPdf(doc, {
-    numero: rec.numero, data: rec.data, comprador: rec.comprador, centroCusto: rec.centroCusto,
-    empresa: resp.razaoSocial, cnpj: resp.cnpj, contato: rec.contato, telefone: rec.telefone, email: rec.email,
-    prazoEntrega: rec.prazoEntrega, formaPgto: rec.formaPgto, prazoPgto: rec.prazoPgto, banco: rec.banco,
-    complementares: rec.complementares,
-    itens: items.map(i => {
-      const hasConv = i.offerUnit && i.offerUnit !== i.unit && i.offerQtyPerUnit;
-      const notas = [];
-      if (i._alterado) notas.push('[Valor alterado pelo comprador]');
-      if (hasConv) notas.push('[Conv: ' + i.offerQtyPerUnit + i.offerUnit + '/' + i.unit + ']');
-      return { code: i.code, name: i.name, qty: i.qty, unit: i.unit, unitPrice: i.unitPrice, total: i.total, nota: notas.join(' ') };
-    })
-  });
+  drawOCPdf(doc, ocBuildData(resp, items, rec));
   const now = new Date();
   const ddmmyyyy = String(now.getDate()).padStart(2,'0') + String(now.getMonth()+1).padStart(2,'0') + now.getFullYear();
   const suppName = String(resp.razaoSocial||'').toUpperCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/[^A-Z0-9\s]/g,'').replace(/\s+/g,'_').substring(0,30);
@@ -2531,6 +2519,26 @@ function confirmOCDialog(){
   doc.save(fileName);
   closeModal('modal-oc-dados');
   toast('PDF gerado: ' + fileName);
+}
+
+// Itens no formato do PDF
+function ocItemsForPdf(items) {
+  return items.map(i => {
+    const hasConv = i.offerUnit && i.offerUnit !== i.unit && i.offerQtyPerUnit;
+    const notas = [];
+    if (i._alterado) notas.push('[Valor alterado pelo comprador]');
+    if (hasConv) notas.push('[Conv: ' + i.offerQtyPerUnit + i.offerUnit + '/' + i.unit + ']');
+    return { code: i.code, name: i.name, qty: i.qty, unit: i.unit, unitPrice: i.unitPrice, total: i.total, nota: notas.join(' ') };
+  });
+}
+function ocBuildData(resp, items, rec) {
+  return {
+    numero: rec.numero, data: rec.data, comprador: rec.comprador, centroCusto: rec.centroCusto,
+    empresa: resp.razaoSocial, cnpj: resp.cnpj, contato: rec.contato, telefone: rec.telefone, email: rec.email,
+    prazoEntrega: rec.prazoEntrega, formaPgto: rec.formaPgto, prazoPgto: rec.prazoPgto, banco: rec.banco,
+    complementares: rec.complementares,
+    itens: ocItemsForPdf(items)
+  };
 }
 
 function downloadOC(respId, cotId) { openOCDialog(respId, cotId); }
