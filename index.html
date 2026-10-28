@@ -312,6 +312,11 @@ canvas{max-width:100%}
     <svg width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"/></svg>
     Análise &amp; Ordens
   </button>
+  <button class="nav-tab" onclick="showPage('page-fornecedores')" data-page="page-fornecedores">
+    <svg width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M3 21h18M5 21V7l7-4 7 4v14M9 9h1m4 0h1M9 13h1m4 0h1M9 17h6"/></svg>
+    Fornecedores
+    <span class="tab-badge" id="badge-fornecedores">0</span>
+  </button>
   <!-- Aba Usuários: visível apenas para master -->
   <button class="nav-tab" onclick="showPage('page-usuarios')" data-page="page-usuarios" id="tab-usuarios" style="display:none">
     <svg width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 00-3-3.87M16 3.13a4 4 0 010 7.75"/></svg>
@@ -471,6 +476,32 @@ canvas{max-width:100%}
 </div>
 
 <!-- USUÁRIOS (somente master) -->
+<!-- FORNECEDORES -->
+<div class="page" id="page-fornecedores">
+  <div class="section-header">
+    <div>
+      <div class="section-title">Cadastro de Fornecedores</div>
+      <div class="section-subtitle">Identificados pelo CNPJ ao preencher a cotação · e-mail e condições de pagamento usados nas Ordens de Compra</div>
+    </div>
+    <div style="display:flex;gap:10px">
+      <input type="text" id="forn-search" placeholder="Buscar por nome, CNPJ ou e-mail..." oninput="renderFornecedores()" style="padding:8px 14px;font-size:13px;border:1.5px solid var(--border);border-radius:8px;background:var(--bg-card);min-width:260px">
+      <button class="btn btn-primary" onclick="openFornecedorModal()">+ Novo Fornecedor</button>
+    </div>
+  </div>
+  <div id="forn-pendentes" style="display:none;margin-bottom:20px"></div>
+  <div class="card">
+    <div class="card-header"><span class="card-title">Fornecedores Cadastrados</span></div>
+    <div class="card-body" style="padding:0">
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Fornecedor</th><th>Contato</th><th>E-mail</th><th>Condições de pagamento</th><th>Ações</th></tr></thead>
+          <tbody id="forn-tbody"></tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+</div>
+
 <div class="page" id="page-usuarios">
   <div class="section-header">
     <div>
@@ -660,13 +691,15 @@ canvas{max-width:100%}
 
 <!-- MODAL: DADOS DA ORDEM DE COMPRA -->
 <div class="modal-overlay" id="modal-oc-dados" style="z-index:1700">
-  <div class="modal" style="max-width:660px">
+  <div class="modal" style="max-width:680px">
     <div class="modal-header">
       <div class="modal-title">📄 Ordem de Compra — <span id="oc-titulo-forn"></span></div>
       <button class="btn btn-ghost btn-icon" onclick="closeModal('modal-oc-dados')">✕</button>
     </div>
     <div class="modal-body">
       <input type="hidden" id="oc-resp-id"><input type="hidden" id="oc-cot-id">
+      <div id="oc-envio-status" style="display:none;background:#ecfdf5;border:1px solid #6ee7b7;border-radius:8px;padding:10px 16px;font-size:12px;color:#065f46;margin-bottom:12px"></div>
+      <div id="oc-cadastro-note" style="background:var(--bg-input);border-radius:8px;padding:10px 16px;font-size:12px;color:var(--text-muted);margin-bottom:14px"></div>
       <div class="form-grid">
         <div class="form-group"><label>Nº R.C *</label><input type="text" id="oc-numero" oninput="window._ocNumDirty=true"></div>
         <div class="form-group"><label>Data</label><input type="text" id="oc-data"></div>
@@ -674,20 +707,49 @@ canvas{max-width:100%}
         <div class="form-group"><label>Centro de Custo</label><input type="text" id="oc-centro"></div>
         <div class="form-group"><label>Contato</label><input type="text" id="oc-contato"></div>
         <div class="form-group"><label>Telefone</label><input type="text" id="oc-telefone"></div>
-        <div class="form-group full"><label>E-mail do fornecedor</label><input type="email" id="oc-email"></div>
+        <div class="form-group full"><label>E-mail do fornecedor</label><input type="text" id="oc-email" placeholder="Mais de um: separe por ponto e vírgula"></div>
         <div class="form-group"><label>Prazo de Entrega</label><input type="text" id="oc-prazo-entrega"></div>
         <div class="form-group"><label>Forma de Pagamento</label><input type="text" id="oc-forma"></div>
         <div class="form-group"><label>Prazo de Pagamento</label><input type="text" id="oc-prazo-pgto" placeholder="Ex: 30 DIAS"></div>
         <div class="form-group"><label>Banco / Agência / Conta</label><input type="text" id="oc-banco"></div>
-        <div class="form-group full"><label>Informações Complementares</label><textarea id="oc-compl" rows="4" style="width:100%;resize:vertical"></textarea></div>
-      </div>
-      <div style="background:var(--bg-input);border-radius:8px;padding:10px 16px;font-size:12px;color:var(--text-muted)">
-        💡 Os dados do fornecedor, o comprador e as informações complementares ficam memorizados para as próximas ordens. O Nº R.C é sugerido em sequência e pode ser editado.
+        <div class="form-group full"><label>Informações Complementares</label><textarea id="oc-compl" rows="3" style="width:100%;resize:vertical"></textarea></div>
+        <div class="form-group full"><label>Mensagem adicional no e-mail (opcional)</label><textarea id="oc-msg-extra" rows="2" style="width:100%;resize:vertical" placeholder="Aparece no início do e-mail, antes dos dados da ordem"></textarea></div>
       </div>
     </div>
     <div class="modal-footer">
       <button class="btn btn-ghost" onclick="closeModal('modal-oc-dados')">Cancelar</button>
-      <button class="btn btn-primary" onclick="confirmOCDialog()">⬇️ Gerar PDF</button>
+      <button class="btn btn-outline" onclick="confirmOCDialog()">⬇️ Gerar PDF</button>
+      <button class="btn btn-primary" id="oc-send-btn" onclick="sendOCByEmail()">✉️ Enviar por e-mail</button>
+    </div>
+  </div>
+</div>
+
+<!-- MODAL: FORNECEDOR -->
+<div class="modal-overlay" id="modal-fornecedor" style="z-index:1800">
+  <div class="modal" style="max-width:700px">
+    <div class="modal-header">
+      <div class="modal-title" id="forn-modal-title">Novo Fornecedor</div>
+      <button class="btn btn-ghost btn-icon" onclick="closeModal('modal-fornecedor')">✕</button>
+    </div>
+    <div class="modal-body">
+      <input type="hidden" id="forn-edit-cnpj">
+      <div class="form-grid">
+        <div class="form-group"><label>CNPJ *</label><input type="text" id="forn-cnpj" placeholder="00.000.000/0000-00" maxlength="18" oninput="maskCNPJ(this)"></div>
+        <div class="form-group"><label>Razão Social *</label><input type="text" id="forn-razao" placeholder="Nome da empresa"></div>
+        <div class="form-group"><label>Contato (nome)</label><input type="text" id="forn-contato"></div>
+        <div class="form-group"><label>Telefone</label><input type="text" id="forn-telefone" placeholder="(51) 00000-0000"></div>
+        <div class="form-group full"><label>E-mail para envio das ordens de compra</label><input type="text" id="forn-email" placeholder="compras@fornecedor.com.br">
+          <span style="font-size:11px;color:var(--text-muted)">Mais de um e-mail: separe por ponto e vírgula.</span></div>
+        <div class="form-group"><label>Prazo / condição de pagamento</label><input type="text" id="forn-prazo-pgto" placeholder="Ex: 30 DIAS"></div>
+        <div class="form-group"><label>Forma de pagamento</label><input type="text" id="forn-forma" placeholder="Ex: Boleto"></div>
+        <div class="form-group"><label>Prazo de entrega</label><input type="text" id="forn-prazo-entrega" placeholder="Ex: 5 dias úteis"></div>
+        <div class="form-group"><label>Banco / Agência / Conta</label><input type="text" id="forn-banco"></div>
+        <div class="form-group full"><label>Observações internas</label><input type="text" id="forn-obs" placeholder="Não aparecem na ordem de compra"></div>
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-ghost" onclick="closeModal('modal-fornecedor')">Cancelar</button>
+      <button class="btn btn-primary" onclick="saveFornecedor()">✓ Salvar Fornecedor</button>
     </div>
   </div>
 </div>
@@ -988,7 +1050,8 @@ async function alterarStatus(id, status) {
 // ══ ESTADO LOCAL ══
 let state = {
   items: [], nextItemId: 1,
-  cotacoes: [], respostas: [], nextCotId: 1
+  cotacoes: [], respostas: [], nextCotId: 1,
+  fornecedores: []
 };
 
 // ══ SEED ITEMS ══
@@ -1031,7 +1094,7 @@ function setSyncStatus(status, text) {
   txt.textContent = text;
 }
 
-async function _apiCallRaw(action, data = {}, quiet = false) {
+async function _apiCallRaw(action, data = {}, quiet = false, strict = false) {
   const st = (s, t) => { if (!quiet) setSyncStatus(s, t); };
   st('syncing', 'Sincronizando...');
   try {
@@ -1056,6 +1119,8 @@ async function _apiCallRaw(action, data = {}, quiet = false) {
         st('ok', 'Sincronizado');
         return json;
       } catch(e) {
+        // Modo estrito (ex.: e-mail): não reenvia em segundo plano, para não duplicar
+        if (strict) { st('error', 'Erro de conexão'); return { status: 'error', message: 'Sem confirmação do servidor (' + e + ')' }; }
         // Fallback: no-cors garante entrega ao GAS mesmo sem ler a resposta
         try {
           await fetch(url, {
@@ -1085,7 +1150,7 @@ async function apiCall(action, data = {}, opts = {}) {
   const isRead = action.startsWith('get') || action === 'loginUser';
   if (!isRead) { window._pendingWrites++; window._writeSeq++; }
   try {
-    const json = await _apiCallRaw(action, data, !!opts.quiet);
+    const json = await _apiCallRaw(action, data, !!opts.quiet, !!opts.strict);
     if (json && json.ver && json.ver.domain) window._ver[json.ver.domain] = json.ver.ts; // versão da própria gravação: não rebaixar de volta
     return json;
   } finally {
@@ -1110,11 +1175,12 @@ async function syncAll() {
   const seq = window._writeSeq;
   setSyncStatus('syncing', 'Carregando...');
   try {
-    const [cotRes, respRes, itemsRes, verRes] = await Promise.all([
+    const [cotRes, respRes, itemsRes, verRes, fornRes] = await Promise.all([
       apiCall('getCotacoes'),
       apiCall('getAllRespostas'),
       apiCall('getItems'),
-      apiCall('getVersions', {}, { quiet: true })
+      apiCall('getVersions', {}, { quiet: true }),
+      apiCall('getFornecedores', {}, { quiet: true })
     ]);
     if (!writesIdleSince(seq)) { setSyncStatus('ok', 'Sincronizado'); return; } // alterou algo durante o carregamento
     if (cotRes.status === 'ok') {
@@ -1122,13 +1188,14 @@ async function syncAll() {
       state.nextCotId = state.cotacoes.length ? Math.max(...state.cotacoes.map(c => c.id)) + 1 : 1;
     }
     if (respRes.status === 'ok') state.respostas = respRes.respostas || [];
+    if (fornRes && fornRes.status === 'ok' && Array.isArray(fornRes.fornecedores)) state.fornecedores = fornRes.fornecedores;
     if (itemsRes.status === 'ok' && itemsRes.items && itemsRes.items.length) {
       state.items = itemsRes.items;
       state.nextItemId = itemsRes.nextItemId || (Math.max(...state.items.map(i => i.id)) + 1);
       saveLocalState();
     }
     if (verRes && verRes.status === 'ok' && verRes.versions) { window._ver = verRes.versions; window._verOk = true; }
-    renderItems(); renderCotacoes(); renderRespostas(); renderDashboard(); updateBadges();
+    renderItems(); renderCotacoes(); renderRespostas(); renderDashboard(); renderFornecedores(); updateBadges();
     if (window._analiseCotId) renderAnalise(window._analiseCotId);
     setSyncStatus('ok', 'Atualizado ' + new Date().toLocaleTimeString('pt-BR', { hour:'2-digit', minute:'2-digit' }));
   } catch(e) {
@@ -1146,14 +1213,15 @@ async function pollVersions() {
     if (!res || res.status !== 'ok' || !res.versions || !writesIdleSince(seq)) return;
     const v = res.versions, old = window._ver || {};
     const ch = k => v[k] && String(v[k]) !== String(old[k]);
-    const nCot = ch('cotacoes'), nResp = ch('respostas'), nItems = ch('items'), nDec = ch('decisoes');
-    if (!(nCot || nResp || nItems || nDec)) return;
+    const nCot = ch('cotacoes'), nResp = ch('respostas'), nItems = ch('items'), nDec = ch('decisoes'), nForn = ch('fornecedores');
+    if (!(nCot || nResp || nItems || nDec || nForn)) return;
     const cotAberta = window._analiseCotId;
-    const [cotRes, respRes, itemsRes, ovRes] = await Promise.all([
+    const [cotRes, respRes, itemsRes, ovRes, fornRes] = await Promise.all([
       nCot ? apiCall('getCotacoes', {}, { quiet: true }) : null,
       nResp ? apiCall('getAllRespostas', {}, { quiet: true }) : null,
       nItems ? apiCall('getItems', {}, { quiet: true }) : null,
-      (nDec && cotAberta) ? fetchOverrides(cotAberta) : null
+      (nDec && cotAberta) ? fetchOverrides(cotAberta) : null,
+      nForn ? apiCall('getFornecedores', {}, { quiet: true }) : null
     ]);
     if (!writesIdleSince(seq)) return; // você alterou algo no meio do caminho: tenta de novo no próximo ciclo
     if (cotRes && cotRes.status === 'ok') {
@@ -1166,13 +1234,15 @@ async function pollVersions() {
       state.nextItemId = itemsRes.nextItemId || (Math.max(...state.items.map(i => i.id)) + 1);
       saveLocalState();
     }
+    if (fornRes && fornRes.status === 'ok' && Array.isArray(fornRes.fornecedores)) state.fornecedores = fornRes.fornecedores;
     if (ovRes) { window.ocOverrides = window.ocOverrides || {}; window.ocOverrides[cotAberta] = ovRes; writeLocalOverrides(cotAberta); }
     window._ver = Object.assign({}, old, v);
     if (nItems) renderItems();
+    if (nForn || nResp) renderFornecedores();
     if (nCot) renderCotacoes();
     if (nResp || nCot) { renderRespostas(); renderDashboard(); }
     updateBadges();
-    if (cotAberta && (nResp || nCot || nDec)) renderAnalise(cotAberta);
+    if (cotAberta && (nResp || nCot || nDec || nForn)) renderAnalise(cotAberta);
     setSyncStatus('ok', 'Atualizado ' + new Date().toLocaleTimeString('pt-BR', { hour:'2-digit', minute:'2-digit' }));
   } catch(e) {
   } finally {
@@ -1195,6 +1265,7 @@ function showPage(id) {
   if (id === 'page-analise')  populateAnaliseSelect();
   if (id === 'page-respostas') loadRespostas();
   if (id === 'page-dashboard') renderDashboard();
+  if (id === 'page-fornecedores') renderFornecedores();
   if (id === 'page-usuarios')  loadUsuarios();
 }
 
@@ -1496,6 +1567,7 @@ function openSupplierForm(cotId) {
   document.getElementById('sf-cotacao-title').textContent = cot.title + ' — Prazo: ' + (cot.deadline ? new Date(cot.deadline+'T12:00:00').toLocaleDateString('pt-BR') : 'A definir');
   document.getElementById('sf-cnpj').value = '';
   document.getElementById('sf-razao').value = '';
+  document.getElementById('sf-razao').readOnly = false;
   document.getElementById('sf-contato').value = '';
   document.getElementById('sf-items-list').innerHTML = (cot.items||[]).map(item => `
     <div style="padding:14px;background:var(--bg-input);border-radius:8px;margin-bottom:8px;border:1px solid var(--border)">
@@ -1554,6 +1626,7 @@ function maskCNPJ(input) {
   v = v.replace(/\.(\d{3})(\d)/,'.$1/$2');
   v = v.replace(/(\d{4})(\d)/,'$1-$2');
   input.value = v;
+  if (input.id === 'sf-cnpj' && v.replace(/\D/g,'').length === 14) autoFillSupplierModal();
 }
 
 // ══ RESPOSTAS ══
@@ -2088,14 +2161,16 @@ function _renderAnaliseInner(cotId) {
   </div>` : '';
   container.innerHTML = tieBanner + Object.values(ordensMap).map(({resp,items}) => {
     const grandTotal = items.reduce((s,i)=>s+i.total,0);
-    const ocId = 'OC-'+cotId+'-'+resp.id+'-'+new Date().getFullYear();
+    const ocRec = (((window.ocOverrides||{})[cotId]||{})._oc||{})[resp.id] || {};
+    const ocId = ocRec.numero || ('OC-'+cotId+'-'+resp.id+'-'+new Date().getFullYear());
     return `<div class="card" style="margin-bottom:16px">
       <div class="card-header">
         <div><div class="card-title">📦 Ordem de Compra — ${anEsc(resp.razaoSocial)}</div>
-          <div style="font-size:12px;color:var(--text-muted)">${anEsc(resp.cnpj)} · ${ocId} · ${items.length} item(s)</div></div>
+          <div style="font-size:12px;color:var(--text-muted)">${anEsc(resp.cnpj)} · ${anEsc(ocId)} · ${items.length} item(s)</div>${ocRec.enviadoEm ? '<div style="margin-top:4px"><span style="font-size:11px;background:#d1fae5;color:#065f46;padding:2px 8px;border-radius:8px;font-weight:600">✉️ Enviada em '+anEsc(ocFmtDateTime(ocRec.enviadoEm))+' para '+anEsc(ocRec.enviadoPara||'')+'</span></div>' : ''}</div>
         <div style="display:flex;align-items:center;gap:10px">
           <strong style="color:var(--green);font-size:16px">${brl(grandTotal)}</strong>
-          <button class="btn btn-danger btn-sm" onclick="downloadOC(${resp.id},${cotId})">⬇️ Baixar PDF</button>
+          <button class="btn btn-ghost btn-sm" onclick="downloadOC(${resp.id},${cotId})">⬇️ Baixar PDF</button>
+          <button class="btn btn-primary btn-sm" onclick="openOCDialog(${resp.id},${cotId})">✉️ ${ocRec.enviadoEm ? 'Reenviar' : 'Enviar por e-mail'}</button>
         </div>
       </div>
       <div class="card-body" style="padding:0">
@@ -2262,7 +2337,7 @@ function downloadCompletoPDF() {
   const ov = window.ocOverrides[cotId] = window.ocOverrides[cotId] || {};
   ov._oc = ov._oc || {};
   const prefs = ocPrefs();
-  const precisaComprador = Object.values(ordensMap).some(({resp}) => !(ov._oc[resp.id] && ov._oc[resp.id].comprador));
+  const precisaComprador = Object.values(ordensMap).some(({resp}) => !ocEffectiveRecord(resp, ov._oc[resp.id]).comprador);
   if (precisaComprador && !prefs.comprador) {
     const padrao = (typeof currentUser !== 'undefined' && currentUser && currentUser.nome && currentUser.nome !== 'Administrador') ? currentUser.nome : '';
     const nome = prompt('Nome do comprador que aparecerá nas ordens de compra:', padrao);
@@ -2270,19 +2345,11 @@ function downloadCompletoPDF() {
   }
   let ultimoNum = ocLocalLast(yyyy), novasOCs = false;
   Object.values(ordensMap).forEach(({resp,items})=>{
-    let rec = ov._oc[resp.id];
-    if (!rec) {
-      const sup = (prefs.suppliers || {})[String(resp.cnpj||'').replace(/\D/g,'')] || {};
-      ultimoNum += 1;
-      rec = {
-        numero: ocNum(ultimoNum, yyyy), data: today, comprador: prefs.comprador || '',
-        centroCusto: prefs.centroCusto !== undefined ? prefs.centroCusto : 'COMPRAS',
-        contato: sup.contato !== undefined ? sup.contato : (resp.contato || ''),
-        telefone: sup.telefone || '', email: sup.email || '', prazoEntrega: sup.prazoEntrega || '',
-        formaPgto: sup.formaPgto || '', prazoPgto: sup.prazoPgto || '', banco: sup.banco || '',
-        complementares: prefs.complementares !== undefined ? prefs.complementares : OC_DEFAULT_COMPL
-      };
-      ov._oc[resp.id] = rec; novasOCs = true;
+    const saved = ov._oc[resp.id];
+    const rec = ocEffectiveRecord(resp, saved); // condições de pagamento/e-mail vêm do cadastro do fornecedor
+    if (!rec.numero) {
+      ultimoNum += 1; rec.numero = ocNum(ultimoNum, yyyy);
+      ov._oc[resp.id] = Object.assign({}, saved || {}, rec); novasOCs = true;
     }
     doc.addPage('a4','portrait');
     drawOCPdf(doc, ocBuildData(resp, items, rec));
@@ -2420,10 +2487,178 @@ function drawOCPdf(doc, d) {
   }
 }
 
-// ══ ORDEM DE COMPRA — diálogo de dados + geração do PDF ══
+// ══ FORNECEDORES (cadastro) ══
+function digitsOnly(s){ return String(s == null ? '' : s).replace(/\D/g, ''); }
+function fmtCNPJ(d){ d = digitsOnly(d); return d.length === 14 ? d.replace(/^(\d{2})(\d{3})(\d{3})(\d{4})(\d{2})$/, '$1.$2.$3/$4-$5') : String(d); }
+function parseEmails(s){ return String(s || '').split(/[;,\s]+/).map(e => e.trim()).filter(Boolean); }
+function validEmail(e){ return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(e); }
+function findFornecedor(cnpj){
+  const d = digitsOnly(cnpj);
+  if (d.length < 14) return null;
+  return (state.fornecedores || []).find(f => digitsOnly(f.cnpj) === d) || null;
+}
+
+function renderFornecedores(){
+  const badge = document.getElementById('badge-fornecedores');
+  const lista = (state.fornecedores || []).slice().sort((a,b) => String(a.razaoSocial).localeCompare(String(b.razaoSocial), 'pt-BR'));
+  if (badge) badge.textContent = lista.length;
+  const tbody = document.getElementById('forn-tbody');
+  if (!tbody) return;
+  const q = (document.getElementById('forn-search')?.value || '').trim().toLowerCase();
+  const qd = digitsOnly(q);
+  const vis = !q ? lista : lista.filter(f =>
+    String(f.razaoSocial).toLowerCase().includes(q) || (qd && digitsOnly(f.cnpj).includes(qd)) ||
+    String(f.contato || '').toLowerCase().includes(q) || String(f.email || '').toLowerCase().includes(q));
+  tbody.innerHTML = vis.length ? vis.map(f => {
+    const d = digitsOnly(f.cnpj);
+    const cond = [f.prazoPgto, f.formaPgto].filter(Boolean).map(anEsc).join(' · ');
+    return `<tr>
+      <td><div style="font-weight:600">${anEsc(f.razaoSocial)}</div><div style="font-size:12px;color:var(--text-muted)">${anEsc(fmtCNPJ(f.cnpj))}</div></td>
+      <td>${f.contato ? anEsc(f.contato) : '<span style="color:var(--text-muted)">—</span>'}${f.telefone ? '<div style="font-size:12px;color:var(--text-muted)">' + anEsc(f.telefone) + '</div>' : ''}</td>
+      <td style="font-size:12px">${f.email ? anEsc(f.email) : '<span class="badge badge-yellow">sem e-mail</span>'}</td>
+      <td style="font-size:12px">${cond || '<span style="color:var(--text-muted)">—</span>'}${f.banco ? '<div style="color:var(--text-muted)">' + anEsc(f.banco) + '</div>' : ''}</td>
+      <td><div style="display:flex;gap:6px">
+        <button class="btn btn-ghost btn-sm btn-icon" onclick="openFornecedorModal('${d}')" title="Editar">✏️</button>
+        <button class="btn btn-ghost btn-sm btn-icon" style="color:var(--red)" onclick="deleteFornecedor('${d}')" title="Excluir">🗑️</button>
+      </div></td></tr>`;
+  }).join('') : '<tr><td colspan="5"><div class="empty-state" style="padding:40px"><h3>' + (lista.length ? 'Nenhum resultado' : 'Nenhum fornecedor cadastrado') + '</h3><p>' + (lista.length ? 'Tente outro termo de busca.' : 'Clique em "+ Novo Fornecedor" para cadastrar.') + '</p></div></td></tr>';
+
+  // Fornecedores que responderam cotações mas ainda não têm cadastro
+  const cad = new Set(lista.map(f => digitsOnly(f.cnpj)));
+  const nao = {};
+  (state.respostas || []).forEach(r => { const d = digitsOnly(r.cnpj); if (d.length === 14 && !cad.has(d) && !nao[d]) nao[d] = r; });
+  const arr = Object.values(nao);
+  const box = document.getElementById('forn-pendentes');
+  if (!box) return;
+  if (!arr.length) { box.style.display = 'none'; box.innerHTML = ''; return; }
+  box.style.display = 'block';
+  box.innerHTML = `<div class="card" style="border:2px solid #fde047">
+    <div class="card-header" style="background:#fffbeb"><span class="card-title" style="color:#92400e">⚠️ Responderam cotações sem cadastro</span><span class="badge badge-yellow">${arr.length}</span></div>
+    <div class="card-body" style="padding:0"><div class="table-wrap"><table><tbody>${arr.map(r => `<tr>
+      <td><div style="font-weight:600">${anEsc(r.razaoSocial)}</div><div style="font-size:12px;color:var(--text-muted)">${anEsc(fmtCNPJ(r.cnpj))}</div></td>
+      <td style="text-align:right"><button class="btn btn-primary btn-sm" onclick="openFornecedorFromResposta(${r.id})">+ Cadastrar</button></td></tr>`).join('')}</tbody></table></div></div></div>`;
+}
+
+function openFornecedorFromResposta(respId){
+  const r = state.respostas.find(x => x.id === respId);
+  if (!r) return;
+  openFornecedorModal(null, { cnpj: r.cnpj, razaoSocial: r.razaoSocial, contato: r.contato });
+}
+
+function openFornecedorModal(cnpj, prefill){
+  const f = cnpj ? findFornecedor(cnpj) : null;
+  const p = f || prefill || {};
+  const set = (id, v) => { document.getElementById(id).value = (v == null ? '' : v); };
+  set('forn-edit-cnpj', f ? digitsOnly(f.cnpj) : '');
+  set('forn-cnpj', p.cnpj ? fmtCNPJ(p.cnpj) : '');
+  document.getElementById('forn-cnpj').readOnly = !!f;
+  set('forn-razao', p.razaoSocial); set('forn-contato', p.contato); set('forn-telefone', p.telefone);
+  set('forn-email', p.email); set('forn-prazo-pgto', p.prazoPgto); set('forn-forma', p.formaPgto);
+  set('forn-banco', p.banco); set('forn-prazo-entrega', p.prazoEntrega); set('forn-obs', p.obs);
+  document.getElementById('forn-modal-title').textContent = f ? 'Editar Fornecedor' : 'Novo Fornecedor';
+  openModal('modal-fornecedor');
+}
+
+function fornecedorFromForm(){
+  const g = id => document.getElementById(id).value.trim();
+  const d = digitsOnly(g('forn-cnpj'));
+  if (d.length !== 14) { toast('Informe um CNPJ válido (14 dígitos)', 'error'); return null; }
+  if (!g('forn-razao')) { toast('Informe a Razão Social', 'error'); return null; }
+  const emails = parseEmails(g('forn-email'));
+  const bad = emails.filter(e => !validEmail(e));
+  if (bad.length) { toast('E-mail inválido: ' + bad[0], 'error'); return null; }
+  return {
+    cnpj: fmtCNPJ(d), razaoSocial: g('forn-razao'), contato: g('forn-contato'), telefone: g('forn-telefone'),
+    email: emails.join('; '), prazoPgto: g('forn-prazo-pgto'), formaPgto: g('forn-forma'), banco: g('forn-banco'),
+    prazoEntrega: g('forn-prazo-entrega'), obs: g('forn-obs')
+  };
+}
+
+function upsertFornecedorLocal(f){
+  state.fornecedores = state.fornecedores || [];
+  const d = digitsOnly(f.cnpj);
+  const idx = state.fornecedores.findIndex(x => digitsOnly(x.cnpj) === d);
+  const antes = idx >= 0 ? JSON.parse(JSON.stringify(state.fornecedores[idx])) : null;
+  if (idx >= 0) state.fornecedores[idx] = f; else state.fornecedores.push(f);
+  return antes;
+}
+function revertFornecedorLocal(f, antes){
+  const d = digitsOnly(f.cnpj);
+  const idx = state.fornecedores.findIndex(x => digitsOnly(x.cnpj) === d);
+  if (antes) { if (idx >= 0) state.fornecedores[idx] = antes; else state.fornecedores.push(antes); }
+  else if (idx >= 0) state.fornecedores.splice(idx, 1);
+}
+
+function saveFornecedor(){
+  const f = fornecedorFromForm();
+  if (!f) return;
+  const antes = upsertFornecedorLocal(f);
+  renderFornecedores();
+  closeModal('modal-fornecedor');
+  toast(antes ? 'Fornecedor atualizado!' : 'Fornecedor cadastrado!');
+  enqueueSave('forn-' + digitsOnly(f.cnpj), () => apiCall('saveFornecedor', f)).then(res => {
+    if (res && res.status === 'ok') return;
+    revertFornecedorLocal(f, antes); renderFornecedores();
+    toast('Erro ao salvar o fornecedor no servidor — alteração desfeita', 'error');
+  });
+}
+
+function deleteFornecedor(d){
+  const f = findFornecedor(d);
+  if (!f) return;
+  if (!confirm('Excluir o cadastro de ' + f.razaoSocial + '?\n(As cotações e ordens já feitas não são afetadas.)')) return;
+  const copia = JSON.parse(JSON.stringify(f));
+  state.fornecedores = state.fornecedores.filter(x => digitsOnly(x.cnpj) !== digitsOnly(d));
+  renderFornecedores();
+  toast('Fornecedor excluído');
+  enqueueSave('forn-' + digitsOnly(d), () => apiCall('deleteFornecedor', { cnpj: digitsOnly(d) })).then(res => {
+    if (res && res.status === 'ok') return;
+    state.fornecedores.push(copia); renderFornecedores();
+    toast('Erro ao excluir no servidor — exclusão desfeita', 'error');
+  });
+}
+
+// Formulário de cotação (lado do comprador): identifica o fornecedor pelo CNPJ
+function autoFillSupplierModal(){
+  const f = findFornecedor(document.getElementById('sf-cnpj').value);
+  const razao = document.getElementById('sf-razao');
+  if (f) {
+    razao.value = f.razaoSocial; razao.readOnly = true;
+    const c = document.getElementById('sf-contato');
+    if (!c.value && f.contato) c.value = f.contato;
+  } else {
+    razao.readOnly = false;
+  }
+}
+
+// Página pública do fornecedor: identifica pelo CNPJ (só devolve razão social e contato)
+function resetIdentificacao(){
+  const razaoEl = document.getElementById('isf-razao'), box = document.getElementById('isf-ident');
+  if (razaoEl) { razaoEl.readOnly = false; razaoEl.style.background = '#fff'; }
+  if (box) box.innerHTML = '';
+}
+async function identificarFornecedorPublico(d){
+  const razaoEl = document.getElementById('isf-razao'), contEl = document.getElementById('isf-contato'), box = document.getElementById('isf-ident');
+  if (!razaoEl) return;
+  try {
+    const res = await apiCall('getFornecedorPublic', { cnpj: d }, { quiet: true });
+    const f = (res && res.status === 'ok') ? res.fornecedor : null;
+    if (f) {
+      razaoEl.value = f.razaoSocial; razaoEl.readOnly = true; razaoEl.style.background = '#f0fdf4';
+      if (contEl && !contEl.value && f.contato) contEl.value = f.contato;
+      if (box) { box.style.color = '#166534'; box.innerHTML = '✅ Fornecedor identificado: <strong>' + anEsc(f.razaoSocial) + '</strong>'; }
+    } else {
+      razaoEl.readOnly = false; razaoEl.style.background = '#fff';
+      if (box) { box.style.color = '#92400e'; box.innerHTML = 'ℹ️ CNPJ ainda não cadastrado — informe a Razão Social.'; }
+    }
+  } catch(e) {}
+}
+
+// ══ ORDEM DE COMPRA — diálogo de dados, PDF e envio por e-mail ══
 const OC_PREF_KEY = 'vn-oc-prefs-v1';
 const OC_COUNTER_KEY = 'vn-oc-counter-v1';
-const OC_DEFAULT_COMPL = 'ENTREGA: SEGUNDA À SEXTA\n08:15h–11:30h e 13:15h–16:00h\nFUNDOS DO HOSPITAL — RECEPÇÃO 3\nNÃO ENVIAR COM CAMINHÃO TRUCK/BI-TRUCK';
+const OC_DEFAULT_COMPL = 'Entregas de segunda a sexta das 07:30h às 11:00h no setor de nutrição.\nEntrada pela rua Araújo Lima, tocar o interfone e aguardar atendimento.';
+const OC_OLD_COMPL = 'ENTREGA: SEGUNDA À SEXTA\n08:15h–11:30h e 13:15h–16:00h\nFUNDOS DO HOSPITAL — RECEPÇÃO 3\nNÃO ENVIAR COM CAMINHÃO TRUCK/BI-TRUCK';
 function ocPrefs(){ try { return JSON.parse(localStorage.getItem(OC_PREF_KEY)||'{}'); } catch(e){ return {}; } }
 function ocSavePrefs(p){ try { localStorage.setItem(OC_PREF_KEY, JSON.stringify(p)); } catch(e){} }
 function ocNum(n, year){ return 'OC-' + String(n).padStart(4,'0') + '-' + year; }
@@ -2440,36 +2675,81 @@ function ocCommitCounter(n, year){
   try { localStorage.setItem(OC_COUNTER_KEY, JSON.stringify({ year, last: n })); } catch(e){}
   apiCall('saveOverrides', { cotacaoId: '_oc_counter', overrides: { year, last: n } }, { quiet: true }).catch(() => {});
 }
+function ocFmtDateTime(iso){ try { return new Date(iso).toLocaleString('pt-BR', { dateStyle: 'short', timeStyle: 'short' }); } catch(e){ return iso || ''; } }
+function ocUserEmail(){ return (typeof currentUser !== 'undefined' && currentUser && currentUser.email) ? currentUser.email : ''; }
+
+// Valores-padrão de uma OC: cadastro do fornecedor (quando existe) e preferências do comprador
+function ocDefaultsFor(resp){
+  const f = findFornecedor(resp.cnpj);
+  const prefs = ocPrefs();
+  const sup = (prefs.suppliers || {})[digitsOnly(resp.cnpj)] || {};
+  const src = f || sup;
+  const defComprador = (typeof currentUser !== 'undefined' && currentUser && currentUser.nome && currentUser.nome !== 'Administrador') ? currentUser.nome : '';
+  return {
+    contato: src.contato || resp.contato || '', telefone: src.telefone || '', email: src.email || '',
+    prazoEntrega: src.prazoEntrega || '', formaPgto: src.formaPgto || '', prazoPgto: src.prazoPgto || '', banco: src.banco || '',
+    comprador: prefs.comprador || defComprador,
+    centroCusto: prefs.centroCusto !== undefined ? prefs.centroCusto : 'COMPRAS',
+    complementares: OC_DEFAULT_COMPL
+  };
+}
+// Registro "efetivo" da OC: dados salvos + cadastro do fornecedor (condições de pagamento/entrega vêm sempre do cadastro, até a OC ser enviada)
+function ocEffectiveRecord(resp, saved){
+  saved = saved || {};
+  const def = ocDefaultsFor(resp);
+  const f = findFornecedor(resp.cnpj);
+  const rec = {
+    numero: saved.numero || '',
+    data: saved.data || new Date().toLocaleDateString('pt-BR'),
+    comprador: saved.comprador || def.comprador,
+    centroCusto: saved.centroCusto !== undefined ? saved.centroCusto : def.centroCusto,
+    contato: saved.contato || def.contato, telefone: saved.telefone || def.telefone, email: saved.email || def.email,
+    prazoEntrega: saved.prazoEntrega !== undefined ? saved.prazoEntrega : def.prazoEntrega,
+    formaPgto: saved.formaPgto !== undefined ? saved.formaPgto : def.formaPgto,
+    prazoPgto: saved.prazoPgto !== undefined ? saved.prazoPgto : def.prazoPgto,
+    banco: saved.banco !== undefined ? saved.banco : def.banco,
+    complementares: (saved.complementares !== undefined && saved.complementares !== OC_OLD_COMPL) ? saved.complementares : def.complementares,
+    enviadoEm: saved.enviadoEm, enviadoPara: saved.enviadoPara
+  };
+  if (f && !saved.enviadoEm) { // condições vêm do cadastro do fornecedor
+    rec.prazoEntrega = def.prazoEntrega; rec.formaPgto = def.formaPgto; rec.prazoPgto = def.prazoPgto; rec.banco = def.banco;
+  }
+  return rec;
+}
 
 async function openOCDialog(respId, cotId){
   const ordens = window._ordensData;
   if (!ordens || !ordens[respId]) { toast('Dados não encontrados', 'error'); return; }
   const resp = ordens[respId].resp;
   const year = new Date().getFullYear();
-  const prefs = ocPrefs();
-  const sup = (prefs.suppliers || {})[String(resp.cnpj||'').replace(/\D/g,'')] || {};
   const saved = ((((window.ocOverrides||{})[cotId]||{})._oc)||{})[respId] || {};
-  const pick = (k, def) => saved[k] !== undefined ? saved[k] : (sup[k] !== undefined ? sup[k] : def);
-  const defComprador = (typeof currentUser !== 'undefined' && currentUser && currentUser.nome && currentUser.nome !== 'Administrador') ? currentUser.nome : '';
+  const rec = ocEffectiveRecord(resp, saved);
+  const f = findFornecedor(resp.cnpj);
+  const locked = !!f && !saved.enviadoEm;
   const set = (id, v) => { document.getElementById(id).value = (v == null ? '' : v); };
   set('oc-resp-id', respId); set('oc-cot-id', cotId);
-  set('oc-numero', saved.numero || ocNum(ocLocalLast(year) + 1, year));
-  window._ocNumDirty = !!saved.numero;
-  set('oc-data', saved.data || new Date().toLocaleDateString('pt-BR'));
-  set('oc-comprador', saved.comprador !== undefined ? saved.comprador : (prefs.comprador !== undefined ? prefs.comprador : defComprador));
-  set('oc-centro', saved.centroCusto !== undefined ? saved.centroCusto : (prefs.centroCusto !== undefined ? prefs.centroCusto : 'COMPRAS'));
-  set('oc-contato', pick('contato', resp.contato || ''));
-  set('oc-telefone', pick('telefone', ''));
-  set('oc-email', pick('email', ''));
-  set('oc-prazo-entrega', pick('prazoEntrega', ''));
-  set('oc-forma', pick('formaPgto', ''));
-  set('oc-prazo-pgto', pick('prazoPgto', ''));
-  set('oc-banco', pick('banco', ''));
-  set('oc-compl', saved.complementares !== undefined ? saved.complementares : (prefs.complementares !== undefined ? prefs.complementares : OC_DEFAULT_COMPL));
+  set('oc-numero', rec.numero || ocNum(ocLocalLast(year) + 1, year));
+  window._ocNumDirty = !!rec.numero;
+  set('oc-data', rec.data); set('oc-comprador', rec.comprador); set('oc-centro', rec.centroCusto);
+  set('oc-contato', rec.contato); set('oc-telefone', rec.telefone); set('oc-email', rec.email);
+  set('oc-prazo-entrega', rec.prazoEntrega); set('oc-forma', rec.formaPgto); set('oc-prazo-pgto', rec.prazoPgto); set('oc-banco', rec.banco);
+  set('oc-compl', rec.complementares); set('oc-msg-extra', '');
+  ['oc-prazo-entrega','oc-forma','oc-prazo-pgto','oc-banco'].forEach(id => {
+    const el = document.getElementById(id);
+    el.readOnly = locked; el.style.background = locked ? 'var(--bg-input)' : ''; el.style.opacity = locked ? '.8' : '';
+  });
+  document.getElementById('oc-cadastro-note').innerHTML = !f
+    ? '⚠️ Fornecedor <strong>não cadastrado</strong>. Ao enviar por e-mail ele será cadastrado com estes dados (ou cadastre na aba Fornecedores).'
+    : (locked ? '✅ Condições de pagamento e entrega vêm do <strong>cadastro do fornecedor</strong>. Para alterar, edite na aba Fornecedores.'
+              : '📌 Esta OC já foi enviada: os dados abaixo são os do envio.');
+  const st = document.getElementById('oc-envio-status');
+  st.style.display = saved.enviadoEm ? 'block' : 'none';
+  st.innerHTML = saved.enviadoEm ? '✉️ Enviada em <strong>' + anEsc(ocFmtDateTime(saved.enviadoEm)) + '</strong> para ' + anEsc(saved.enviadoPara || '') : '';
   document.getElementById('oc-titulo-forn').textContent = resp.razaoSocial;
+  document.getElementById('oc-send-btn').textContent = saved.enviadoEm ? '✉️ Reenviar por e-mail' : '✉️ Enviar por e-mail';
   openModal('modal-oc-dados');
   // Refina o nº com o contador compartilhado (servidor), se o usuário ainda não mexeu no campo
-  if (!saved.numero) {
+  if (!rec.numero) {
     ocServerLast(year).then(last => {
       if (window._ocNumDirty) return;
       set('oc-numero', ocNum(Math.max(last, ocLocalLast(year)) + 1, year));
@@ -2477,48 +2757,139 @@ async function openOCDialog(respId, cotId){
   }
 }
 
-function confirmOCDialog(){
+// Lê e valida o diálogo
+function ocCollectDialog(){
   const g = id => document.getElementById(id).value.trim();
   const respId = parseInt(g('oc-resp-id')), cotId = parseInt(g('oc-cot-id'));
   const ordens = window._ordensData;
-  if (!ordens || !ordens[respId]) { toast('Dados não encontrados', 'error'); return; }
+  if (!ordens || !ordens[respId]) { toast('Dados não encontrados', 'error'); return null; }
   const { resp, items } = ordens[respId];
-  const numero = g('oc-numero'), comprador = g('oc-comprador');
-  if (!numero) { toast('Informe o Nº R.C', 'error'); return; }
-  if (!comprador) { toast('Informe o nome do comprador', 'error'); return; }
+  if (!g('oc-numero')) { toast('Informe o Nº R.C', 'error'); return null; }
+  if (!g('oc-comprador')) { toast('Informe o nome do comprador', 'error'); return null; }
+  const saved = ((((window.ocOverrides||{})[cotId]||{})._oc)||{})[respId] || {};
   const rec = {
-    numero, data: g('oc-data'), comprador, centroCusto: g('oc-centro'),
+    numero: g('oc-numero'), data: g('oc-data'), comprador: g('oc-comprador'), centroCusto: g('oc-centro'),
     contato: g('oc-contato'), telefone: g('oc-telefone'), email: g('oc-email'),
     prazoEntrega: g('oc-prazo-entrega'), formaPgto: g('oc-forma'), prazoPgto: g('oc-prazo-pgto'), banco: g('oc-banco'),
-    complementares: document.getElementById('oc-compl').value.trim()
+    complementares: document.getElementById('oc-compl').value.trim(),
+    enviadoEm: saved.enviadoEm, enviadoPara: saved.enviadoPara
   };
-  // Memoriza para as próximas OCs (comprador/centro de custo/complementares e dados do fornecedor)
+  return { respId, cotId, resp, items, rec };
+}
+
+// Guarda o registro da OC na cotação (mesmo nº ao baixar de novo) e atualiza contador/preferências
+function ocStoreRecord(cotId, respId, resp, rec){
   const prefs = ocPrefs();
-  prefs.comprador = rec.comprador; prefs.centroCusto = rec.centroCusto; prefs.complementares = rec.complementares;
-  prefs.suppliers = prefs.suppliers || {};
-  prefs.suppliers[String(resp.cnpj||'').replace(/\D/g,'')] = {
-    contato: rec.contato, telefone: rec.telefone, email: rec.email,
-    prazoEntrega: rec.prazoEntrega, formaPgto: rec.formaPgto, prazoPgto: rec.prazoPgto, banco: rec.banco
-  };
+  prefs.comprador = rec.comprador; prefs.centroCusto = rec.centroCusto;
+  if (!findFornecedor(resp.cnpj)) {
+    prefs.suppliers = prefs.suppliers || {};
+    prefs.suppliers[digitsOnly(resp.cnpj)] = {
+      contato: rec.contato, telefone: rec.telefone, email: rec.email,
+      prazoEntrega: rec.prazoEntrega, formaPgto: rec.formaPgto, prazoPgto: rec.prazoPgto, banco: rec.banco
+    };
+  }
   ocSavePrefs(prefs);
-  // Guarda na cotação (o mesmo nº volta ao baixar de novo) e atualiza o contador — em segundo plano
   window.ocOverrides = window.ocOverrides || {};
   const ov = window.ocOverrides[cotId] = window.ocOverrides[cotId] || {};
   ov._oc = ov._oc || {}; ov._oc[respId] = rec;
   persistOverrides(cotId);
-  const m = numero.match(/^OC-(\d+)-(\d{4})$/);
+  const m = rec.numero.match(/^OC-(\d+)-(\d{4})$/);
   if (m) { const yr = parseInt(m[2]), n = parseInt(m[1]); if (n > ocLocalLast(yr)) ocCommitCounter(n, yr); }
+}
 
+function ocMakePdf(resp, items, rec){
   const { jsPDF } = window.jspdf;
   const doc = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
   drawOCPdf(doc, ocBuildData(resp, items, rec));
   const now = new Date();
   const ddmmyyyy = String(now.getDate()).padStart(2,'0') + String(now.getMonth()+1).padStart(2,'0') + now.getFullYear();
   const suppName = String(resp.razaoSocial||'').toUpperCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/[^A-Z0-9\s]/g,'').replace(/\s+/g,'_').substring(0,30);
-  const fileName = 'OC_' + suppName + '_' + ddmmyyyy + '.pdf';
+  return { doc, fileName: 'OC_' + suppName + '_' + ddmmyyyy + '.pdf' };
+}
+
+function confirmOCDialog(){
+  const d = ocCollectDialog();
+  if (!d) return;
+  ocStoreRecord(d.cotId, d.respId, d.resp, d.rec);
+  const { doc, fileName } = ocMakePdf(d.resp, d.items, d.rec);
   doc.save(fileName);
   closeModal('modal-oc-dados');
   toast('PDF gerado: ' + fileName);
+}
+
+function ocEmailBody(rec, cot, total, extra){
+  const linhas = ['Prezados,', ''];
+  if (extra) linhas.push(extra, '');
+  linhas.push('Segue em anexo a Ordem de Compra ' + rec.numero + (cot ? ', referente à ' + cot.title : '') + '.', '');
+  linhas.push('Valor total: R$ ' + ocMoney(total));
+  if (rec.prazoPgto) linhas.push('Prazo de pagamento: ' + rec.prazoPgto);
+  if (rec.formaPgto) linhas.push('Forma de pagamento: ' + rec.formaPgto);
+  if (rec.prazoEntrega) linhas.push('Prazo de entrega: ' + rec.prazoEntrega);
+  if (rec.complementares) linhas.push('', 'Informações para entrega:', rec.complementares);
+  linhas.push('', 'Por favor, confirme o recebimento deste e-mail e a previsão de entrega.', '',
+    'Atenciosamente,', rec.comprador, 'Setor de Compras — Associação Hospitalar Vila Nova', 'Tel: (51) 3191-3602');
+  return linhas.join('\n');
+}
+
+async function sendOCByEmail(){
+  const d = ocCollectDialog();
+  if (!d) return;
+  const { cotId, respId, resp, items, rec } = d;
+  const cot = (state.cotacoes || []).find(c => c.id === cotId);
+  const emails = parseEmails(rec.email);
+  if (!emails.length) { toast('Informe o e-mail do fornecedor', 'error'); return; }
+  const bad = emails.filter(e => !validEmail(e));
+  if (bad.length) { toast('E-mail inválido: ' + bad[0], 'error'); return; }
+  if (rec.enviadoEm && !confirm('Esta OC já foi enviada em ' + ocFmtDateTime(rec.enviadoEm) + '.\nEnviar novamente?')) return;
+
+  const btn = document.getElementById('oc-send-btn');
+  const label = btn.textContent;
+  const reset = () => { btn.disabled = false; btn.textContent = label; };
+  btn.disabled = true; btn.textContent = 'Enviando...';
+  try {
+    // O envio só vai para e-mails do cadastro do fornecedor: cadastra / atualiza antes, se preciso
+    const f = findFornecedor(resp.cnpj);
+    const cadastrados = f ? parseEmails(f.email).map(e => e.toLowerCase()) : [];
+    const novos = emails.filter(e => !cadastrados.includes(e.toLowerCase()));
+    if (!f || novos.length) {
+      const msg = f ? 'O e-mail ' + novos.join(', ') + ' ainda não está no cadastro de ' + resp.razaoSocial + '.\nAdicionar ao cadastro e enviar?'
+                    : resp.razaoSocial + ' ainda não está cadastrado.\nCadastrar com estes dados e enviar?';
+      if (!confirm(msg)) { reset(); return; }
+      const nf = Object.assign({}, f || {
+        cnpj: fmtCNPJ(resp.cnpj), razaoSocial: resp.razaoSocial,
+        formaPgto: rec.formaPgto, prazoPgto: rec.prazoPgto, banco: rec.banco, prazoEntrega: rec.prazoEntrega, obs: ''
+      });
+      nf.contato = nf.contato || rec.contato; nf.telefone = nf.telefone || rec.telefone;
+      nf.email = cadastrados.length ? (f.email + '; ' + novos.join('; ')) : emails.join('; ');
+      const r0 = await apiCall('saveFornecedor', nf);
+      if (!r0 || r0.status !== 'ok') { toast('Não foi possível cadastrar o fornecedor: ' + ((r0 && r0.message) || 'tente novamente'), 'error'); reset(); return; }
+      upsertFornecedorLocal(nf); renderFornecedores();
+    }
+    const { doc, fileName } = ocMakePdf(resp, items, rec);
+    const pdfBase64 = doc.output('datauristring').split(',')[1];
+    const total = items.reduce((s, i) => s + (i.total || 0), 0);
+    const userEmail = ocUserEmail();
+    const res = await apiCall('sendOcEmail', {
+      cnpj: resp.cnpj, to: emails,
+      subject: 'Ordem de Compra ' + rec.numero + ' — Associação Hospitalar Vila Nova',
+      body: ocEmailBody(rec, cot, total, document.getElementById('oc-msg-extra').value.trim()),
+      filename: fileName, pdfBase64, replyTo: userEmail, ccEmail: userEmail,
+      fromName: 'Associação Hospitalar Vila Nova — Compras',
+      meta: { cotacaoId: cotId, numero: rec.numero, fornecedor: resp.razaoSocial, usuario: rec.comprador }
+    }, { strict: true });
+    if (!res || res.status !== 'ok') {
+      toast('Não foi possível confirmar o envio: ' + ((res && res.message) || 'falha de conexão') + '. Confira antes de reenviar.', 'error');
+      reset(); return;
+    }
+    rec.enviadoEm = new Date().toISOString(); rec.enviadoPara = emails.join('; ');
+    ocStoreRecord(cotId, respId, resp, rec);
+    closeModal('modal-oc-dados');
+    reset();
+    toast('OC ' + rec.numero + ' enviada para ' + emails.join(', '));
+    renderAnalise(cotId);
+  } catch(e) {
+    toast('Erro ao enviar: ' + e, 'error'); reset();
+  }
 }
 
 // Itens no formato do PDF
@@ -2578,14 +2949,14 @@ function showSupplierPage(cot) {
         <div style="font-size:13px;color:#4a7a4a;margin-top:4px;padding-left:62px">📋 <strong>${cot.title}</strong> &nbsp;·&nbsp; Prazo: <strong>${cot.deadline?new Date(cot.deadline+'T12:00:00').toLocaleDateString('pt-BR'):'A definir'}</strong> &nbsp;·&nbsp; ${(cot.items||[]).length} itens</div>
       </div>
       <div id="supplier-notice" style="background:#f0fdf4;border:1px solid #bbf7d0;border-radius:10px;padding:12px 18px;margin-bottom:16px;font-size:13px;color:#166534">
-        ℹ️ Preencha o <strong>CNPJ</strong> e <strong>Razão Social</strong> obrigatoriamente. Informe preço e disponibilidade para cada item.<br>
+        ℹ️ Preencha o <strong>CNPJ</strong> (a empresa é identificada pelo CNPJ) e, se ainda não for cadastrada, a <strong>Razão Social</strong>. Informe preço e disponibilidade para cada item.<br>
         <span style="font-size:12px;opacity:.8">Se já enviou uma cotação anteriormente, informe o mesmo CNPJ para editar e reenviar.</span>
       </div>
       <div style="background:#fff;border-radius:16px;padding:24px 28px;margin-bottom:16px;border:1px solid #d4e8d4;box-shadow:0 2px 12px rgba(0,0,0,.06)">
         <div style="font-size:13px;font-weight:700;color:#166634;text-transform:uppercase;letter-spacing:.07em;margin-bottom:16px">Dados da empresa</div>
         <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px">
           <div><label style="font-size:11px;font-weight:700;color:#4a7a4a;text-transform:uppercase;letter-spacing:.06em;display:block;margin-bottom:6px">CNPJ *</label>
-            <input type="text" id="isf-cnpj" placeholder="00.000.000/0000-00" maxlength="18" oninput="maskCNPJ(this)" onblur="tryLoadPreviousAnswer(${cot.id})" style="width:100%;padding:10px 14px;border:1.5px solid #c8e0c8;border-radius:8px;font-size:14px;color:#1a3a1a;background:#fff;outline:none;font-family:Inter,sans-serif"></div>
+            <input type="text" id="isf-cnpj" placeholder="00.000.000/0000-00" maxlength="18" oninput="maskCNPJ(this)" onblur="tryLoadPreviousAnswer(${cot.id})" style="width:100%;padding:10px 14px;border:1.5px solid #c8e0c8;border-radius:8px;font-size:14px;color:#1a3a1a;background:#fff;outline:none;font-family:Inter,sans-serif"><div id="isf-ident" style="font-size:12px;margin-top:6px"></div></div>
           <div><label style="font-size:11px;font-weight:700;color:#4a7a4a;text-transform:uppercase;letter-spacing:.06em;display:block;margin-bottom:6px">Razão Social *</label>
             <input type="text" id="isf-razao" placeholder="Nome da empresa" style="width:100%;padding:10px 14px;border:1.5px solid #c8e0c8;border-radius:8px;font-size:14px;color:#1a3a1a;background:#fff;outline:none;font-family:Inter,sans-serif"></div>
           <div style="grid-column:1/-1"><label style="font-size:11px;font-weight:700;color:#4a7a4a;text-transform:uppercase;letter-spacing:.06em;display:block;margin-bottom:6px">Contato</label>
@@ -2630,14 +3001,16 @@ function showSupplierPage(cot) {
 // Tenta carregar resposta anterior ao digitar CNPJ (edição pelo fornecedor)
 async function tryLoadPreviousAnswer(cotId) {
   const cnpjDigits = (document.getElementById('isf-cnpj').value||'').replace(/\D/g,'');
-  if (cnpjDigits.length < 14) return;
+  if (cnpjDigits.length < 14) { resetIdentificacao(); return; }
+  const identP = identificarFornecedorPublico(cnpjDigits);
   const res = await apiCall('getRespostas', { cotacaoId: cotId });
   if (res.status !== 'ok') return;
   const match = (res.respostas||[]).find(r => r.cnpj.replace(/\D/g,'') === cnpjDigits);
   if (!match) return;
 
-  // Pré-preenche dados da empresa
-  document.getElementById('isf-razao').value  = match.razaoSocial||'';
+  await identP;
+  // Pré-preenche dados da empresa (a razão social do cadastro do fornecedor prevalece)
+  if (!document.getElementById('isf-razao').readOnly) document.getElementById('isf-razao').value = match.razaoSocial||'';
   document.getElementById('isf-contato').value = match.contato||'';
 
   // Pré-preenche preços de cada item
