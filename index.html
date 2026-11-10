@@ -144,13 +144,27 @@ canvas{max-width:100%}
 #login-info{background:rgba(52,211,153,.14);border:1px solid rgba(52,211,153,.4);color:#a7f3d0}
 .user-row{display:grid;grid-template-columns:1fr 180px 90px 100px;gap:12px;align-items:center;padding:14px 20px;border-bottom:1px solid var(--border-light);font-size:13px}
 .user-row:hover{background:var(--bg-card-hover)}.user-row-header{background:#f1f8f4;font-weight:700;font-size:12px;color:var(--green-dim)}
-@media(max-width:1100px){.lg-tag,@media(max-width:900px){.charts-grid,.charts-grid.cg-21{grid-template-columns:1fr}.user-row{grid-template-columns:1fr 1fr}
+@media(max-width:1100px){.lg-tag{display:none}.lg-brand{left:24px;top:20px}}
+@media(max-width:900px){.charts-grid,.charts-grid.cg-21{grid-template-columns:1fr}.user-row{grid-template-columns:1fr 1fr}
   body{padding-left:0}.nav-tabs{position:static;width:auto;flex-direction:row;overflow-x:auto;padding:10px}.brand,.nav-foot{display:none}.nav-tab{padding:9px 12px}}
 @media(max-width:768px){header{padding:0 16px}.main{padding:20px 16px}.form-grid{grid-template-columns:1fr}.lg-brand{display:none}}
+/* fundo animado + translucidez */
+#bg-canvas{position:fixed;inset:0;width:100%;height:100%;z-index:0;pointer-events:none}
+.public-mode #bg-canvas{display:none}
+.main{position:relative;z-index:1}
+.card,.chart-card,.stat-card{background:rgba(255,255,255,.88);backdrop-filter:blur(6px)}
+/* carrinho */
+.cart-hint{display:flex;align-items:center;gap:10px;padding:12px 18px;margin-bottom:16px;border:1.5px dashed rgba(15,159,110,.4);border-radius:14px;background:rgba(15,159,110,.05);font-size:13px;color:var(--text-secondary)}
+.cart-card{border:1.5px solid rgba(15,159,110,.45);box-shadow:var(--shadow-green)}
+.cart-card .card-header{background:linear-gradient(90deg,rgba(15,159,110,.16),transparent)}
+.qty-in{width:92px;padding:5px 8px;font-size:13px}
+.cart-on{background:var(--green)!important;color:#fff!important;border-color:var(--green)!important}
+.tag-alt{font-size:10px;background:#fef3c7;color:#92400e;padding:1px 6px;border-radius:8px;font-weight:600}
 </style>
 
 </head>
 <body>
+<canvas id="bg-canvas"></canvas>
 
 <!-- ══ TELA DE LOGIN ══ -->
 <div id="login-screen" style="display:none">
@@ -1594,7 +1608,7 @@ function renderRespostas() {
           <div style="font-size:12px;color:var(--text-muted)">${resp.cnpj} · ${cot?.title||'Cotação #'+resp.cotacaoId} · ${new Date(resp.submittedAt).toLocaleString('pt-BR')}</div>
         </div>
         <div style="display:flex;align-items:center;gap:10px">
-          <span class="badge badge-green">Total: R$ ${total.toFixed(2).replace('.',',')}</span>
+          <span class="badge badge-green">Total: ${brl(total)}</span>
           <button class="btn btn-outline btn-sm" onclick="openEditResposta(${resp.id})">✏️ Editar</button>
         </div>
       </div>
@@ -1603,8 +1617,8 @@ function renderRespostas() {
           <thead><tr><th>Item</th><th>Qtd</th><th>Preço Unit.</th><th>Total</th><th>Validade</th><th>Disponível</th><th>Comentário</th></tr></thead>
           <tbody>${(resp.prices||[]).map(p => `<tr>
             <td>${p.name}</td><td>${p.qty} ${p.unit}</td>
-            <td>R$ ${p.price.toFixed(2).replace('.',',')}</td>
-            <td>R$ ${(p.price*p.qty).toFixed(2).replace('.',',')}</td>
+            <td>${brl(p.price,4)}</td>
+            <td>${brl(p.price*p.qty)}</td>
             <td>${p.validade?new Date(p.validade+'T12:00:00').toLocaleDateString('pt-BR'):'—'}</td>
             <td><span class="badge ${p.disponivel?'badge-green':'badge-red'}">${p.disponivel?'✅ Sim':'❌ Não'}</span></td>
             <td style="font-size:12px">${p.comment||'-'}</td>
@@ -1727,7 +1741,7 @@ function recalcEquiv(itemId, cotUnit) {
   if (!el) return;
 
   if (!offerQtyRaw || offerQty <= 0 || offerUnit === cotUnit) {
-    el.textContent = offerUnit === cotUnit && price > 0 ? 'R$ ' + price.toFixed(4).replace('.',',') : '—';
+    el.textContent = offerUnit === cotUnit && price > 0 ? brl(price,4) : '—';
     el.style.color = 'var(--text-muted)';
     return;
   }
@@ -1736,7 +1750,7 @@ function recalcEquiv(itemId, cotUnit) {
     el.textContent = '⚠️ Unidades incompatíveis';
     el.style.color = 'var(--red)';
   } else {
-    el.textContent = 'R$ ' + equiv.toFixed(4).replace('.',',');
+    el.textContent = brl(equiv,4);
     el.style.color = 'var(--green)';
   }
 }
@@ -1805,7 +1819,7 @@ function populateAnaliseSelect(skipAnalyse) {
 // ══ AJUSTES DO COMPRADOR + DECISÕES DE EMPATE (persistidas) ══
 const OC_LOCAL_KEY = 'vn-oc-overrides-v1';
 function anEsc(s){ return String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
-function brl(v){ return 'R$ ' + Number(v||0).toFixed(2).replace('.',','); }
+function brl(v, d){ return 'R$ ' + Number(v||0).toLocaleString('pt-BR',{minimumFractionDigits:2,maximumFractionDigits:Math.max(2,d||2)}); }
 function effPrice(p){ return (p.priceEquiv && p.priceEquiv > 0) ? p.priceEquiv : p.price; }
 
 function readLocalOverrides(){ try { return JSON.parse(localStorage.getItem(OC_LOCAL_KEY)||'{}'); } catch(e){ return {}; } }
@@ -1952,12 +1966,12 @@ function getBestPrices(cotId) {
     }
     if (!ordensMap[chosen.resp.id]) ordensMap[chosen.resp.id] = {resp:chosen.resp, items:[]};
     ordensMap[chosen.resp.id].items.push({
-      ...item,
+      ...item, qty: effQty(cotId, item), _qtyOrig: item.qty, _qtyAlt: effQty(cotId, item) !== item.qty,
       unitPrice: chosen.price,
       rawPrice:  chosen.rawPrice,
       offerUnit: chosen.offerUnit,
       offerQtyPerUnit: chosen.offerQtyPerUnit,
-      total: chosen.price * item.qty,
+      total: chosen.price * effQty(cotId, item),
       _redirected: viaDecision,
       _alterado: chosen.altered,
       _precoOriginal: chosen.original,
@@ -2021,7 +2035,7 @@ function _renderAnaliseInner(cotId) {
   const grandTotals = resps.map(r => (r.prices||[]).reduce((s,p) => {
     if (p.desqualificado || !p.disponivel || p.price <= 0) return s;
     const cotItem = (cot.items||[]).find(i => i.itemId === p.itemId);
-    return s + (effPrice(p) * (cotItem?.qty || p.qty));
+    return s + (effPrice(p) * (cotItem ? effQty(cotId, cotItem) : p.qty));
   }, 0));
   const minTotal = Math.min(...grandTotals);
   const avgTotal = grandTotals.reduce((a,b) => a+b,0)/grandTotals.length;
@@ -2067,18 +2081,20 @@ function _renderAnaliseInner(cotId) {
         + (p.comment ? '<br><small style="color:var(--text-muted);font-size:11px">💬 '+anEsc(p.comment)+'</small>' : '')
         + `<br><span style="display:inline-flex;gap:4px;margin-top:4px">
             <button class="btn btn-ghost btn-sm" style="${btnStyle}" title="Alterar valor" onclick="openAnaliseEdit(${r.id},${item.itemId})">✏️</button>
-            <button class="btn btn-ghost btn-sm" style="${btnStyle};color:var(--red)" title="Desqualificar" onclick="toggleDesqualificarAnalise(${r.id},${item.itemId})">⛔</button></span></td>`;
+            <button class="btn btn-ghost btn-sm" style="${btnStyle};color:var(--red)" title="Desqualificar" onclick="toggleDesqualificarAnalise(${r.id},${item.itemId})">⛔</button>
+            <button class="btn btn-ghost btn-sm ${cartHas(cotId,r.id,item.itemId)?'cart-on':''}" style="${btnStyle}" title="Adicionar ao carrinho (OC avulsa)" onclick="cartToggle(${cotId},${r.id},${item.itemId})">🛒</button></span></td>`;
     }).join('');
     const winnerCell = tieIds.has(item.itemId)
       ? '<span style="font-size:12px;background:#fffbeb;color:#92400e;padding:2px 8px;border-radius:8px;font-weight:600">⚖️ Empate — decidir abaixo</span>'
       : (winnerByItem[item.itemId] ? anEsc(winnerByItem[item.itemId]) : '—');
-    return `<tr><td><strong>${anEsc(item.name)}</strong><br><small style="color:var(--text-muted)">${anEsc(item.code)}</small></td><td>${item.qty} ${anEsc(item.unit)}</td>
+    return `<tr><td><strong>${anEsc(item.name)}</strong><br><small style="color:var(--text-muted)">${anEsc(item.code)}</small></td><td>${fmtQty(effQty(cotId,item))} ${anEsc(item.unit)}${effQty(cotId,item)!==item.qty?'<br><span class="tag-alt">✏️ orig. '+fmtQty(item.qty)+'</span>':''}<br><button class="btn btn-ghost btn-sm" style="padding:2px 7px;font-size:11px;margin-top:4px" title="Alterar quantidade" onclick="openQtyEdit(${cotId},${item.itemId})">✏️ Qtd</button></td>
       ${cells}
       <td><span class="best-price">${best!==null?brl(best):'N/D'}</span></td>
       <td style="font-weight:600;color:var(--green)">${winnerCell}</td></tr>`;
   }).join('');
 
   const container = document.getElementById('ordens-container');
+  renderCart(cotId);
   if (!ordensMap) { container.innerHTML=''; return; }
   const tieBanner = ties.length ? `<div style="background:#fffbeb;border:2px solid #f59e0b;border-radius:12px;padding:20px 24px;margin-bottom:20px">
     <div style="font-weight:700;font-size:15px;color:#92400e;margin-bottom:14px">⚠️ ${ties.length} item(s) com empate de preço — decisão necessária</div>
@@ -2110,7 +2126,7 @@ function _renderAnaliseInner(cotId) {
             ${items.map(i=>{
               const hasConv = i.offerUnit && i.offerUnit !== i.unit && i.offerQtyPerUnit;
               const convNote = hasConv
-                ? `<br><span style="font-size:10px;background:#ede9fe;color:#6d28d9;padding:1px 6px;border-radius:6px;font-weight:600;">🔄 Ofertado: ${anEsc(i.offerQtyPerUnit)}${anEsc(i.offerUnit)} = R$ ${i.rawPrice?i.rawPrice.toFixed(2):''}</span>`
+                ? `<br><span style="font-size:10px;background:#ede9fe;color:#6d28d9;padding:1px 6px;border-radius:6px;font-weight:600;">🔄 Ofertado: ${anEsc(i.offerQtyPerUnit)}${anEsc(i.offerUnit)} = ${i.rawPrice?brl(i.rawPrice,4):''}</span>`
                 : '';
               const altNote = i._alterado
                 ? `<br><span style="font-size:10px;background:#fef3c7;color:#92400e;padding:1px 6px;border-radius:8px;font-weight:600;">✏️ Valor alterado pelo comprador${i._precoOriginal?' (original '+brl(i._precoOriginal)+')':''}</span>${i._obs?`<br><small style="color:#92400e;font-size:10px">📝 ${anEsc(i._obs)}</small>`:''}`
@@ -2122,8 +2138,8 @@ function _renderAnaliseInner(cotId) {
                 <td><code style="background:var(--bg-input);padding:2px 7px;border-radius:4px;font-family:monospace;font-size:12px">${anEsc(i.code)}</code></td>
                 <td>${anEsc(i.name)}${redirNote}${altNote}${convNote}</td>
                 <td><span class="badge ${i.type==='perecivel'?'badge-red':'badge-purple'}">${i.type==='perecivel'?'Perecível':'Não Perecível'}</span></td>
-                <td>${i.qty}</td><td>${anEsc(i.unit)}</td>
-                <td>R$ ${i.unitPrice.toFixed(4).replace('.',',')}</td>
+                <td>${fmtQty(i.qty)}${i._qtyAlt?'<br><span class="tag-alt">✏️ orig. '+fmtQty(i._qtyOrig)+'</span>':''} <button class="btn btn-ghost btn-sm" style="padding:2px 7px;font-size:11px" title="Alterar quantidade" onclick="openQtyEdit(${cotId},${i.itemId})">✏️</button></td><td>${anEsc(i.unit)}</td>
+                <td>${brl(i.unitPrice,4)}</td>
                 <td><strong>${brl(i.total)}</strong></td>
               </tr>`;
             }).join('')}
@@ -2185,7 +2201,7 @@ function renderDashboard() {
   const resps = state.respostas.filter(r=>r.cotacaoId===targetCot.id);
   const bestTotal = allBestItems.reduce((s,i)=>s+i.total,0);
   const avgTotal = resps.reduce((s,r)=>s+(r.prices||[]).reduce((ss,p)=>ss+(p.price*p.qty),0),0)/(resps.length||1);
-  document.getElementById('ds-economia').textContent = 'R$ ' + Math.max(0,avgTotal-bestTotal).toFixed(2).replace('.',',');
+  document.getElementById('ds-economia').textContent = brl(Math.max(0,avgTotal-bestTotal));
   if (top10.length) {
     document.getElementById('chart-maior-custo').style.display='block'; document.getElementById('chart-maior-custo-empty').style.display='none';
     dashCharts.custo = new Chart(document.getElementById('chart-maior-custo'),{type:'bar',data:{labels:top10.map(i=>i.name.length>20?i.name.substring(0,20)+'...':i.name),datasets:[{label:'Custo Total (R$)',data:top10.map(i=>i.total),backgroundColor:'rgba(34,197,94,0.6)',borderColor:'rgba(34,197,94,0.9)',borderWidth:1}]},options:{responsive:true,plugins:{legend:{display:false}},indexAxis:'y',scales:{x:{beginAtZero:true}}}});
@@ -2203,8 +2219,8 @@ function renderDashboard() {
     <td><strong>${item.name}</strong><br><small style="color:var(--text-muted)">${item.code}</small></td>
     <td><span class="badge badge-blue">${item.category}</span></td>
     <td>${item.qty} ${item.unit}</td>
-    <td>R$ ${item.unitPrice.toFixed(2).replace('.',',')}</td>
-    <td><strong style="color:var(--red)">R$ ${item.total.toFixed(2).replace('.',',')}</strong></td>
+    <td>${brl(item.unitPrice)}</td>
+    <td><strong style="color:var(--red)">${brl(item.total)}</strong></td>
   </tr>`).join('');
 }
 
@@ -2252,10 +2268,10 @@ function downloadCompletoPDF() {
   resps.forEach(r=>headerRow.push(r.razaoSocial.split(' ').slice(0,2).join(' ')));
   headerRow.push('Melhor Preco','Fornecedor Vencedor');
   const bodyRows=(cot.items||[]).map(item=>{
-    const row=[item.name,item.qty+' '+item.unit];
+    const row=[item.name,fmtQty(effQty(cot.id,item))+' '+item.unit];
     let best=null,bestSupp='—';
-    resps.forEach(r=>{const p=(r.prices||[]).find(p=>p.itemId===item.itemId);if(p&&!p.desqualificado&&p.disponivel&&p.price>0){const ep=(p.priceEquiv&&p.priceEquiv>0)?p.priceEquiv:p.price;row.push('R$ '+ep.toFixed(2));if(best===null||ep<best){best=ep;bestSupp=r.razaoSocial.split(' ').slice(0,2).join(' ');}}else{row.push('N/D');}});
-    row.push(best?'R$ '+best.toFixed(2):'N/D'); row.push(bestSupp); return row;
+    resps.forEach(r=>{const p=(r.prices||[]).find(p=>p.itemId===item.itemId);if(p&&!p.desqualificado&&p.disponivel&&p.price>0){const ep=(p.priceEquiv&&p.priceEquiv>0)?p.priceEquiv:p.price;row.push(brl(ep));if(best===null||ep<best){best=ep;bestSupp=r.razaoSocial.split(' ').slice(0,2).join(' ');}}else{row.push('N/D');}});
+    row.push(best?brl(best):'N/D'); row.push(bestSupp); return row;
   });
   const supplierColW=Math.min(38,Math.floor(180/resps.length));
   const colStyles={0:{cellWidth:55},1:{cellWidth:18,halign:'center'}};
@@ -2351,13 +2367,13 @@ function drawOCPdf(doc, d) {
   y = section('ITENS DO PEDIDO', y + 4.2);
   doc.autoTable({
     startY: y + 3, margin: { left: L, right: 210 - R, bottom: 22 },
-    head: [['CÓDIGO','DESCRIÇÃO','QTD','R$ UNIT','R$ TOTAL']],
+    head: [['CÓDIGO','DESCRIÇÃO','QTD','VLR. UNIT.','VLR. TOTAL']],
     body: d.itens.map(i => [
       i.code || '',
       i.name + (i.nota ? '\n' + i.nota : ''),
-      (i.qty != null ? String(i.qty) : '') + (i.unit ? ' ' + i.unit : ''),
-      ocUnitFmt(i.unitPrice),
-      ocMoney(i.total)
+      (i.qty != null ? fmtQty(i.qty) : '') + (i.unit ? ' ' + i.unit : ''),
+      'R$ ' + ocUnitFmt(i.unitPrice),
+      'R$ ' + ocMoney(i.total)
     ]),
     theme: 'plain',
     styles: { font: 'helvetica', fontSize: 7.5, textColor: BLACK, cellPadding: { top: 2.3, bottom: 2.3, left: 2, right: 2 }, valign: 'middle' },
@@ -2676,7 +2692,7 @@ async function openOCDialog(respId, cotId){
   const st = document.getElementById('oc-envio-status');
   st.style.display = saved.enviadoEm ? 'block' : 'none';
   st.innerHTML = saved.enviadoEm ? '✉️ Enviada em <strong>' + anEsc(ocFmtDateTime(saved.enviadoEm)) + '</strong> para ' + anEsc(saved.enviadoPara || '') : '';
-  document.getElementById('oc-titulo-forn').textContent = resp.razaoSocial;
+  document.getElementById('oc-titulo-forn').textContent = resp.razaoSocial + (ordens[respId].avulsa ? ' — OC avulsa' : '');
   document.getElementById('oc-send-btn').textContent = saved.enviadoEm ? '✉️ Reenviar por e-mail' : '✉️ Enviar por e-mail';
   openModal('modal-oc-dados');
   // Refina o nº com o contador compartilhado (servidor), se o usuário ainda não mexeu no campo
@@ -2705,6 +2721,7 @@ function ocCollectDialog(){
     complementares: document.getElementById('oc-compl').value.trim(),
     enviadoEm: saved.enviadoEm, enviadoPara: saved.enviadoPara
   };
+  if (ordens[respId].avulsa) { rec.avulsa = true; rec.respReal = resp.id; rec.itens = items; }
   return { respId, cotId, resp, items, rec };
 }
 
@@ -2724,6 +2741,7 @@ function ocStoreRecord(cotId, respId, resp, rec){
   const ov = window.ocOverrides[cotId] = window.ocOverrides[cotId] || {};
   ov._oc = ov._oc || {}; ov._oc[respId] = rec;
   persistOverrides(cotId);
+  if (rec.avulsa) cartRemoveSupplier(cotId, rec.respReal);
   const m = rec.numero.match(/^OC-(\d+)-(\d{4})$/);
   if (m) { const yr = parseInt(m[2]), n = parseInt(m[1]); if (n > ocLocalLast(yr)) ocCommitCounter(n, yr); }
 }
@@ -2735,7 +2753,7 @@ function ocMakePdf(resp, items, rec){
   const now = new Date();
   const ddmmyyyy = String(now.getDate()).padStart(2,'0') + String(now.getMonth()+1).padStart(2,'0') + now.getFullYear();
   const suppName = String(resp.razaoSocial||'').toUpperCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/[^A-Z0-9\s]/g,'').replace(/\s+/g,'_').substring(0,30);
-  return { doc, fileName: 'OC_' + suppName + '_' + ddmmyyyy + '.pdf' };
+  return { doc, fileName: 'OC_' + suppName + '_' + ddmmyyyy + (rec.avulsa ? '_AVULSA_' + String(rec.numero).replace(/[^A-Za-z0-9]/g,'') : '') + '.pdf' };
 }
 
 function confirmOCDialog(){
@@ -2746,6 +2764,7 @@ function confirmOCDialog(){
   doc.save(fileName);
   closeModal('modal-oc-dados');
   toast('PDF gerado: ' + fileName);
+  if (d.rec.avulsa) renderAnalise(d.cotId);
 }
 
 function ocEmailBody(rec, cot, total, extra){
@@ -3161,6 +3180,157 @@ function renderDashAnalytics() {
   dashPriceList(document.getElementById('dash-alta'), alta.slice(0, 8), true);
   dashPriceList(document.getElementById('dash-queda'), queda.slice(0, 8), false);
 }
+
+// ══ QUANTIDADES AJUSTÁVEIS ══
+function effQty(cotId, item) { const q = ((((window.ocOverrides||{})[cotId]||{})._qty)||{})[item.itemId]; return q > 0 ? q : item.qty; }
+function fmtQty(q) { return Number(q||0).toLocaleString('pt-BR', { maximumFractionDigits: 3 }); }
+function parseQty(s) { s = String(s||'').trim(); return s.includes(',') ? parseFloat(s.replace(/\./g,'').replace(',','.')) : parseFloat(s); }
+function qtyModalEnsure() {
+  if (document.getElementById('modal-qty')) return;
+  document.body.insertAdjacentHTML('beforeend', `<div class="modal-overlay" id="modal-qty"><div class="modal" style="max-width:400px">
+    <div class="modal-header"><div class="modal-title">✏️ Alterar quantidade</div><button class="btn btn-ghost btn-icon" onclick="closeModal('modal-qty')">✕</button></div>
+    <div class="modal-body"><div id="qty-info" style="font-size:13px;color:var(--text-secondary);margin-bottom:14px"></div>
+      <div class="form-group"><label>Nova quantidade</label><input type="text" inputmode="decimal" id="qty-input" onkeydown="if(event.key==='Enter')saveQtyEdit()"></div>
+      <div style="font-size:12px;color:var(--text-muted);margin-top:10px">Use quando o fornecedor cotar outra apresentação de embalagem. A quantidade vale para a análise e para as ordens de compra desta cotação.</div></div>
+    <div class="modal-footer"><button class="btn btn-ghost" onclick="saveQtyEdit(true)">Restaurar original</button><button class="btn btn-primary" onclick="saveQtyEdit()">Salvar</button></div></div></div>`);
+}
+function openQtyEdit(cotId, itemId) {
+  qtyModalEnsure();
+  const it = ((state.cotacoes.find(c => c.id === cotId)||{}).items||[]).find(i => i.itemId === itemId); if (!it) return;
+  window._qtyCtx = { cotId, itemId };
+  document.getElementById('qty-info').innerHTML = '<strong>' + anEsc(it.name) + '</strong><br>Quantidade original: ' + fmtQty(it.qty) + ' ' + anEsc(it.unit);
+  const inp = document.getElementById('qty-input'); inp.value = String(effQty(cotId, it)).replace('.', ',');
+  openModal('modal-qty'); setTimeout(() => { inp.focus(); inp.select(); }, 60);
+}
+async function saveQtyEdit(reset) {
+  const { cotId, itemId } = window._qtyCtx || {}; if (!cotId) return;
+  const it = ((state.cotacoes.find(c => c.id === cotId)||{}).items||[]).find(i => i.itemId === itemId); if (!it) return;
+  const v = reset ? it.qty : parseQty(document.getElementById('qty-input').value);
+  if (!(v > 0)) { toast('Informe uma quantidade válida', 'error'); return; }
+  const ov = window.ocOverrides[cotId] = (window.ocOverrides||{})[cotId] || {}; ov._qty = ov._qty || {};
+  if (Math.abs(v - it.qty) < 1e-9) delete ov._qty[itemId]; else ov._qty[itemId] = v;
+  closeModal('modal-qty'); renderAnalise(cotId); toast('Quantidade atualizada: ' + fmtQty(v) + ' ' + it.unit);
+  await persistOverrides(cotId);
+}
+
+// ══ CARRINHO / OC AVULSA ══
+window._cart = window._cart || {};
+function cartList(cotId) { return (window._cart[cotId] = window._cart[cotId] || []); }
+function cartHas(cotId, respId, itemId) { return cartList(cotId).some(c => c.respId === respId && c.itemId === itemId); }
+function cartToggle(cotId, respId, itemId) {
+  const L = cartList(cotId), i = L.findIndex(c => c.respId === respId && c.itemId === itemId);
+  if (i >= 0) L.splice(i, 1);
+  else { const it = ((state.cotacoes.find(c => c.id === cotId)||{}).items||[]).find(x => x.itemId === itemId); L.push({ respId, itemId, qty: it ? effQty(cotId, it) : 1 }); }
+  renderAnalise(cotId);
+}
+function cartSetQty(cotId, respId, itemId, val) {
+  const v = parseQty(val), c = cartList(cotId).find(x => x.respId === respId && x.itemId === itemId);
+  if (c && v > 0) c.qty = v; else if (c) toast('Quantidade inválida', 'error');
+  renderAnalise(cotId);
+}
+function cartClear(cotId) { window._cart[cotId] = []; renderAnalise(cotId); }
+function cartRemoveSupplier(cotId, respId) { window._cart[cotId] = cartList(cotId).filter(c => c.respId !== respId); }
+function cartEntry(cotId, c) {
+  const cot = state.cotacoes.find(x => x.id === cotId), resp = state.respostas.find(r => r.id === c.respId);
+  const item = ((cot||{}).items||[]).find(i => i.itemId === c.itemId);
+  const p = resp && (resp.prices||[]).find(p => p.itemId === c.itemId);
+  if (!item || !p || p.desqualificado || !p.disponivel || !(p.price > 0)) return null;
+  const unitPrice = effPrice(p);
+  return { resp, item, p, c, unitPrice, total: unitPrice * c.qty,
+    oc: { ...item, qty: c.qty, unitPrice, rawPrice: p.price, offerUnit: p.offerUnit, offerQtyPerUnit: p.offerQtyPerUnit, total: unitPrice * c.qty,
+      _alterado: p.alteradoComprador === true, _precoOriginal: p.precoOriginal, _obs: p.obsComprador || '' } };
+}
+function cartGenerate(cotId, respId) {
+  const rows = cartList(cotId).filter(c => c.respId === respId).map(c => cartEntry(cotId, c)).filter(Boolean);
+  if (!rows.length) { toast('Carrinho vazio para este fornecedor', 'error'); return; }
+  const key = -(Date.now() % 1000000000);
+  window._ordensData = window._ordensData || {};
+  window._ordensData[key] = { resp: rows[0].resp, items: rows.map(r => r.oc), avulsa: true };
+  openOCDialog(key, cotId);
+}
+function openAvulsa(cotId, key) {
+  const rec = ((((window.ocOverrides||{})[cotId]||{})._oc)||{})[key]; if (!rec) return;
+  const resp = state.respostas.find(r => r.id === rec.respReal); if (!resp) { toast('Resposta do fornecedor não encontrada', 'error'); return; }
+  window._ordensData = window._ordensData || {};
+  window._ordensData[key] = { resp, items: rec.itens || [], avulsa: true };
+  openOCDialog(Number(key), cotId);
+}
+function renderCart(cotId) {
+  const oc = document.getElementById('ordens-container'); if (!oc) return;
+  let box = document.getElementById('cart-container');
+  if (!box) { box = document.createElement('div'); box.id = 'cart-container'; oc.parentElement.insertBefore(box, oc); }
+  const groups = {};
+  cartList(cotId).forEach(c => { const d = cartEntry(cotId, c); if (d) (groups[c.respId] = groups[c.respId] || { resp: d.resp, rows: [] }).rows.push(d); });
+  const gs = Object.values(groups);
+  const hint = '<div class="cart-hint">🛒 <span>Use o botão <strong>🛒</strong> nos preços da tabela comparativa para montar uma <strong>ordem de compra avulsa</strong> com itens de qualquer fornecedor (ex.: dividir um item entre dois fornecedores ou repor uma falta).</span></div>';
+  let html = gs.length ? gs.map(g => {
+    const tot = g.rows.reduce((s, r) => s + r.total, 0);
+    return `<div class="card cart-card" style="margin-bottom:16px"><div class="card-header">
+      <div><div class="card-title">🛒 Carrinho — ${anEsc(g.resp.razaoSocial)}</div><div style="font-size:12px;color:var(--text-muted)">${g.rows.length} item(s) selecionado(s)</div></div>
+      <div style="display:flex;align-items:center;gap:10px"><strong style="color:var(--green);font-size:16px">${brl(tot)}</strong>
+        <button class="btn btn-primary btn-sm" onclick="cartGenerate(${cotId},${g.resp.id})">📦 Gerar OC avulsa</button></div></div>
+      <div class="table-wrap"><table><thead><tr><th>Item</th><th>Qtd</th><th>Unid.</th><th>Preço Unit.</th><th>Total</th><th></th></tr></thead><tbody>
+      ${g.rows.map(r => `<tr><td><strong>${anEsc(r.item.name)}</strong><br><small style="color:var(--text-muted)">${anEsc(r.item.code)}</small></td>
+        <td><input class="qty-in" type="text" inputmode="decimal" value="${fmtQty(r.c.qty)}" onchange="cartSetQty(${cotId},${g.resp.id},${r.item.itemId},this.value)"></td>
+        <td>${anEsc(r.item.unit)}</td><td>${brl(r.unitPrice, 4)}</td><td><strong>${brl(r.total)}</strong></td>
+        <td><button class="btn btn-ghost btn-sm" title="Remover" onclick="cartToggle(${cotId},${g.resp.id},${r.item.itemId})">✕</button></td></tr>`).join('')}
+      </tbody></table></div></div>`;
+  }).join('')
+    + `<div style="text-align:right;margin:-6px 0 16px"><button class="btn btn-ghost btn-sm" onclick="cartClear(${cotId})">Limpar carrinho</button></div>` : hint;
+  const oc_ = (((window.ocOverrides||{})[cotId]||{})._oc) || {};
+  const av = Object.entries(oc_).filter(([k, r]) => r && r.avulsa);
+  if (av.length) html += `<div class="card" style="margin-bottom:16px"><div class="card-header"><div class="card-title">📄 Ordens avulsas geradas</div><span class="badge badge-blue">${av.length}</span></div>
+    <div class="table-wrap"><table><thead><tr><th>Nº</th><th>Fornecedor</th><th>Itens</th><th>Total</th><th>Status</th><th></th></tr></thead><tbody>
+    ${av.map(([k, r]) => { const resp = state.respostas.find(x => x.id === r.respReal), tot = (r.itens||[]).reduce((s, i) => s + (i.total||0), 0);
+      return `<tr><td><strong>${anEsc(r.numero)}</strong></td><td>${anEsc(resp ? resp.razaoSocial : '—')}</td><td>${(r.itens||[]).length}</td><td><strong>${brl(tot)}</strong></td>
+        <td>${r.enviadoEm ? '<span class="badge badge-green">✉️ Enviada em ' + anEsc(ocFmtDateTime(r.enviadoEm)) + '</span>' : '<span class="badge badge-gray">Não enviada</span>'}</td>
+        <td style="white-space:nowrap"><button class="btn btn-ghost btn-sm" onclick="openAvulsa(${cotId},'${k}')">⬇️ PDF</button> <button class="btn btn-primary btn-sm" onclick="openAvulsa(${cotId},'${k}')">✉️ ${r.enviadoEm ? 'Reenviar' : 'Enviar'}</button></td></tr>`; }).join('')}
+    </tbody></table></div></div>`;
+  box.innerHTML = html;
+}
+
+// ══ FUNDO: silhueta do logotipo com pontos luminosos itinerantes ══
+const BG_LOGO = {"ar":1.0484,"c":[[0.2192,0.5088,0.2077,0.5091,0.2,0.5046,0.1953,0.496,0.1954,0.4839,0.2687,0.2177,0.2846,0.167,0.3016,0.129,0.3179,0.1008,0.3423,0.0701,0.3577,0.056,0.3738,0.0444,0.3923,0.0346,0.4115,0.0271,0.4462,0.0211,0.5385,0.0209,0.5692,0.0243,0.6,0.0334,0.6264,0.0484,0.6543,0.0726,0.6692,0.0901,0.6819,0.1089,0.7008,0.1452,0.7137,0.1774,0.7308,0.2339,0.7325,0.2419,0.7308,0.2477,0.7231,0.2481,0.7077,0.2436,0.5808,0.2036,0.5746,0.1976,0.5615,0.1767,0.5462,0.1652,0.5308,0.1631,0.4615,0.1629,0.4462,0.166,0.4358,0.1734,0.4265,0.1855,0.411,0.2177,0.3581,0.3992,0.3423,0.4336,0.3231,0.4574,0.2999,0.4758,0.2808,0.4858,0.2192,0.5088],[0.7769,0.7704,0.7654,0.7717,0.7636,0.7702,0.7634,0.7621,0.8036,0.6169,0.8088,0.6089,0.8346,0.5892,0.843,0.5726,0.8441,0.4879,0.8435,0.4798,0.8393,0.4677,0.8334,0.4597,0.8231,0.451,0.7938,0.4355,0.6154,0.3772,0.5962,0.3679,0.5773,0.3548,0.5538,0.3294,0.5447,0.3145,0.5357,0.2944,0.5141,0.2298,0.5158,0.2177,0.5231,0.2095,0.5346,0.2071,0.5462,0.2095,0.8154,0.2922,0.8577,0.3093,0.8885,0.326,0.9231,0.3533,0.9463,0.379,0.9649,0.4113,0.9711,0.4274,0.9779,0.4597,0.9787,0.5766,0.977,0.5968,0.9716,0.621,0.958,0.6532,0.9462,0.6714,0.9307,0.6895,0.9115,0.7075,0.8923,0.7215,0.8692,0.735,0.8423,0.7477,0.7769,0.7704],[0.4731,0.8436,0.4615,0.8458,0.4423,0.8407,0.1654,0.7547,0.1359,0.7419,0.1015,0.7218,0.0769,0.7026,0.0531,0.6774,0.0334,0.6452,0.026,0.625,0.0196,0.5968,0.0175,0.5766,0.0179,0.4718,0.0231,0.4396,0.0346,0.4081,0.0526,0.379,0.0769,0.3527,0.1121,0.3266,0.1462,0.3087,0.2077,0.286,0.2269,0.2804,0.2334,0.2823,0.2337,0.2903,0.1931,0.4355,0.1885,0.4438,0.1618,0.4637,0.1537,0.4798,0.153,0.5645,0.1552,0.5806,0.1615,0.5909,0.1692,0.5981,0.1808,0.6064,0.2,0.6159,0.2308,0.6275,0.3731,0.6724,0.3962,0.6821,0.4189,0.6976,0.4318,0.7097,0.4462,0.7277,0.4625,0.7621,0.4822,0.8226,0.4809,0.8347,0.4731,0.8436],[0.6385,0.996,0.6269,0.9979,0.5462,0.998,0.3731,0.9979,0.3605,0.996,0.3498,0.9879,0.3346,0.9714,0.3171,0.9476,0.3033,0.9234,0.2843,0.879,0.2684,0.8266,0.2643,0.8065,0.2692,0.8038,0.2808,0.8066,0.4154,0.8484,0.4192,0.8514,0.4382,0.879,0.4462,0.8852,0.4538,0.8882,0.5346,0.8893,0.5462,0.888,0.5538,0.8849,0.5677,0.871,0.5826,0.8427,0.5939,0.8105,0.6401,0.6492,0.6462,0.6346,0.6577,0.6147,0.6769,0.592,0.7038,0.5728,0.7769,0.5439,0.7885,0.5434,0.7962,0.5476,0.8002,0.5524,0.8027,0.5605,0.8021,0.5685,0.7192,0.8659,0.6979,0.9194,0.6821,0.9476,0.6577,0.9793,0.6385,0.996]]};
+(function initBgLogo() {
+  const cv = document.getElementById('bg-canvas'); if (!cv) return;
+  const ctx = cv.getContext('2d'), reduce = window.matchMedia && matchMedia('(prefers-reduced-motion: reduce)').matches;
+  let W, H, D, paths = [], dots = [], last = 0;
+  function build() {
+    D = window.devicePixelRatio || 1; W = innerWidth; H = innerHeight;
+    cv.width = W * D; cv.height = H * D; ctx.setTransform(D, 0, 0, D, 0, 0);
+    const side = W > 900 ? 256 : 0, hh = Math.min(H * 0.86, (W - side) * 0.78 / BG_LOGO.ar), ww = hh * BG_LOGO.ar;
+    const ox = side + (W - side) / 2 - ww / 2, oy = H / 2 - hh / 2;
+    paths = BG_LOGO.c.map(c => { const pts = [], cum = [0];
+      for (let i = 0; i < c.length; i += 2) pts.push([ox + c[i] * ww, oy + c[i + 1] * hh]);
+      for (let i = 1; i < pts.length; i++) cum.push(cum[i - 1] + Math.hypot(pts[i][0] - pts[i-1][0], pts[i][1] - pts[i-1][1]));
+      return { pts, cum, len: cum[cum.length - 1] }; });
+    if (!dots.length) for (let i = 0; i < 18; i++) dots.push({ p: i % paths.length, t: Math.random(), v: (0.018 + Math.random() * 0.03) * (Math.random() < .5 ? 1 : -1), r: 3 + Math.random() * 2 });
+  }
+  function at(path, t) { t = ((t % 1) + 1) % 1; const d = t * path.len; let lo = 0, hi = path.cum.length - 1;
+    while (hi - lo > 1) { const m = (lo + hi) >> 1; if (path.cum[m] <= d) lo = m; else hi = m; }
+    const seg = (path.cum[hi] - path.cum[lo]) || 1, f = (d - path.cum[lo]) / seg, a = path.pts[lo], b = path.pts[hi];
+    return [a[0] + (b[0] - a[0]) * f, a[1] + (b[1] - a[1]) * f]; }
+  function draw(ts) {
+    const dt = Math.min(0.05, (ts - last) / 1000 || 0); last = ts;
+    ctx.clearRect(0, 0, W, H);
+    ctx.beginPath();
+    paths.forEach(p => { p.pts.forEach((q, i) => i ? ctx.lineTo(q[0], q[1]) : ctx.moveTo(q[0], q[1])); ctx.closePath(); });
+    ctx.fillStyle = 'rgba(15,159,110,.085)'; ctx.fill('evenodd');
+    ctx.strokeStyle = 'rgba(15,159,110,.32)'; ctx.lineWidth = 1.6; ctx.lineJoin = 'round'; ctx.stroke();
+    dots.forEach(d => {
+      const P = paths[d.p]; d.t += d.v * dt * (3000 / P.len);
+      for (let k = 14; k >= 1; k--) { const q = at(P, d.t - Math.sign(d.v) * k * 0.004), a = 1 - k / 15;
+        ctx.beginPath(); ctx.arc(q[0], q[1], d.r * (0.3 + 0.7 * a), 0, 6.283); ctx.fillStyle = 'rgba(16,185,129,' + (0.5 * a * a).toFixed(3) + ')'; ctx.fill(); }
+      const h = at(P, d.t), g = ctx.createRadialGradient(h[0], h[1], 0, h[0], h[1], d.r * 6);
+      g.addColorStop(0, 'rgba(52,211,153,.6)'); g.addColorStop(1, 'rgba(52,211,153,0)');
+      ctx.fillStyle = g; ctx.beginPath(); ctx.arc(h[0], h[1], d.r * 6, 0, 6.283); ctx.fill();
+      ctx.beginPath(); ctx.arc(h[0], h[1], d.r, 0, 6.283); ctx.fillStyle = '#10b981'; ctx.fill();
+      ctx.beginPath(); ctx.arc(h[0], h[1], d.r * 0.45, 0, 6.283); ctx.fillStyle = '#fff'; ctx.fill();
+    });
+    if (!reduce) requestAnimationFrame(draw);
+  }
+  build(); addEventListener('resize', () => { build(); if (reduce) draw(0); }); requestAnimationFrame(draw);
+})();
 
 init();
 </script>
